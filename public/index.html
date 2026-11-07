@@ -1,242 +1,48 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#101116">
-  <title>AHM Studio — AI Story & Explainer Video Studio</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090b10"><title>AHM Movies — Movie Recap Studio</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brandMark">AHM</div>
-    <div>
-      <div class="brand">AHM STUDIO</div>
-      <div class="tagline">AI STORY & EXPLAINER VIDEO STUDIO · FREE-FIRST</div>
+<header class="topbar"><a class="brand" href="/"><span class="brand-icon">AHM</span><span>AHM <b>MOVIES</b><small>FULL MOVIE → RECAP STUDIO</small></span></a><span id="connection" class="status-pill">Checking services…</span></header>
+<main class="shell">
+  <section class="hero"><p class="eyebrow">YOUR MOVIE. THE WHOLE STORY. THREE EPISODES.</p><h1>Turn a full movie into a <em>cinematic recap.</em></h1><p>Upload the original film. AHM follows the story from the opening scene to the real ending, then builds a narrated recap using footage from your movie.</p><div class="hero-tags"><span>Original footage only</span><span>5–6 minute recap</span><span>3 downloadable parts</span><span>3:4 format</span></div></section>
+
+  <section class="panel">
+    <div class="section-title"><span class="step">01</span><div><h2>Upload your full movie</h2><p>MP4, MOV, MKV, WebM · up to 8 GB · uploads directly to secure object storage.</p></div></div>
+    <label class="dropzone" id="dropzone" for="movieFile"><input id="movieFile" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/mpeg"><span class="upload-symbol">↑</span><strong id="fileTitle">Choose your movie</strong><span id="fileMeta">Tap to browse your phone or computer</span><span class="browse">Browse files</span></label>
+    <div id="uploadProgress" class="progress-wrap" hidden><div class="progress-track"><i id="uploadBar"></i></div><small id="uploadLabel">Preparing upload…</small></div>
+    <video id="moviePreview" controls playsinline hidden></video>
+  </section>
+
+  <section class="panel">
+    <div class="section-title"><span class="step">02</span><div><h2>Recap production settings</h2><p>Keep the whole story intact. The third episode must include the movie's actual ending.</p></div></div>
+    <div class="settings-grid">
+      <div><label for="length">Recap length</label><select id="length"><option value="5">About 5 minutes</option><option value="5.5" selected>About 5½ minutes</option><option value="6">About 6 minutes</option></select></div>
+      <div><label for="language">Narration language</label><select id="language"><option>English</option><option>Kiswahili</option></select></div>
+      <div><label for="voice">Narrator voice</label><select id="voice"><option value="en-US-AndrewNeural">Andrew · Natural storyteller</option><option value="en-US-BrianNeural">Brian · Warm, grounded</option><option value="en-US-GuyNeural">Guy · Deep cinematic</option><option value="en-US-JennyNeural">Jenny · Clear expressive</option><option value="en-GB-RyanNeural">Ryan · British narrator</option><option value="sw-KE-RafikiNeural">Rafiki · Kiswahili</option><option value="sw-KE-ZuriNeural">Zuri · Kiswahili</option></select></div>
+      <div><label for="pace">Speaking pace <output id="paceValue">Normal</output></label><input id="pace" type="range" min="0.85" max="1.15" step="0.05" value="1"></div>
     </div>
-    <div class="freeBadge">FREE-FIRST</div>
-  </header>
+    <div class="promise"><b>Three natural episodes</b><span>Cliffhangers at meaningful story moments · Part 3 completes the ending · No forced equal cuts.</span></div>
+  </section>
 
-  <main class="layout">
-    <section class="intro panel">
-      <div class="eyebrow">CREATE · DIRECT · GENERATE</div>
-      <h1>Turn any topic or story into a cinematic 3D video.</h1>
-      <p>Enter a question, topic, story idea or script. AHM automatically chooses explainer or cinematic story mode, then directs the scenes, characters, dialogue, camera moves, transitions and sound.</p>
+  <section class="panel">
+    <div class="section-title"><span class="step">03</span><div><h2>Voice-over & subtitles</h2><p>These stay part of the final edit — they are not optional placeholder sections.</p></div></div>
+    <div class="preview-subtitle">THEY THOUGHT IT WAS OVER…<small>SUBTITLE STYLE PREVIEW</small></div>
+    <div class="settings-grid">
+      <div><label>Subtitle appearance</label><div class="setting-readonly">BOLD · WHITE · ALL CAPS · ITALIC</div></div>
+      <div><label>Subtitle position</label><div class="setting-readonly">CENTRED · LOWER MIDDLE</div></div>
+      <div><label>Subtitle timing</label><div class="setting-readonly">Synced to generated narration</div></div>
+      <div><label>Footage source</label><div class="setting-readonly">Your uploaded original movie</div></div>
+    </div>
+  </section>
 
-      <div class="notice">
-        <strong>Production status:</strong>
-        Gemini can create the story and scene plan. Full cinematic video rendering is not connected yet. AHM will not label a storyboard, moving graphic or placeholder as your finished video.
-      </div>
-      <p id="providerStatus" class="hint">Checking production connections…</p>
+  <section class="panel action-panel"><div><p class="eyebrow">READY WHEN YOUR SERVICES ARE CONNECTED</p><h2>Build my 3-part movie recap</h2><p id="serviceNote">Checking storage and processing worker…</p></div><button id="startBtn" disabled>Upload & create recap <span>→</span></button><div id="jobStatus" class="job-status" role="status">Choose a movie to begin.</div></section>
 
-    </section>
-
-    <section class="panel">
-      <div class="sectionHead">
-        <span class="step">01</span>
-        <div>
-          <h2>Your topic or script</h2>
-          <p>Ask a question, enter a topic or story premise, or paste your script. AHM automatically selects story or explainer mode.</p>
-        </div>
-      </div>
-
-      <label for="titleInput">Optional video title</label>
-      <input id="titleInput" maxlength="100"
-        placeholder="e.g. Why does your stomach make sounds?"
-        value="">
-
-      <label for="scriptInput">Topic, question, idea or existing script</label>
-      <textarea id="scriptInput" rows="7"
-        placeholder="Example: How does light travel? Or: A fisherman catches a magical golden fish… Or paste your story/script…"></textarea>
-
-      <div class="row wrap">
-        <button id="aiStoryBtn" class="primary">Create AI Director plan</button>
-        <button id="sceneBtn" class="secondary">Build basic outline manually</button>
-      </div>
-      <p id="aiStoryStatus" class="hint" role="status">Create an AI Director plan first. The storyboard preview is not a finished cinematic video; full video rendering is currently being built.</p>
-
-      <label class="uploadBox" for="voiceFile">
-        <span class="uploadIcon">🎙️</span>
-        <span>
-          <strong>Optional: use your own narration</strong>
-          <small>Add a narration recording for reference. It is not yet attached to the full cinematic video renderer.</small>
-          <em id="voiceName">No narration uploaded</em>
-        </span>
-      </label>
-      <input class="hiddenInput" id="voiceFile" type="file" accept="audio/*">
-
-      <label class="uploadBox" for="musicFile">
-        <span class="uploadIcon">🎵</span>
-        <span>
-          <strong>Optional: add your own music</strong>
-          <small>Add a music reference. Automatic soundtrack mixing is not available in the current preview.</small>
-          <em id="musicName">No music uploaded</em>
-        </span>
-      </label>
-      <input class="hiddenInput" id="musicFile" type="file" accept="audio/*">
-
-      <div class="audioProductionSettings">
-        <p class="smallNote">Voice and music controls are being prepared for the complete video pipeline. No audio is generated by this storyboard preview.</p>
-        <label for="voiceStyle">AI narrator voice</label>
-        <select id="voiceStyle">
-          <option value="Charon" selected>Charon · Clear documentary voice</option>
-          <option value="Kore">Kore · Firm and expressive</option>
-          <option value="Puck">Puck · Upbeat and energetic</option>
-          <option value="Aoede">Aoede · Breezy and warm</option>
-          <option value="Fenrir">Fenrir · Excitable and dramatic</option>
-          <option value="Zephyr">Zephyr · Bright and friendly</option>
-          <option value="Leda">Leda · Youthful</option>
-          <option value="Orus">Orus · Firm</option>
-        </select>
-
-        <label class="musicToggle" for="musicEnabled">
-          <input id="musicEnabled" type="checkbox">
-          <span><strong>Generate an original background score</strong><small>Paid Lyria score is reserved for the later cinematic upgrade. Free mode creates a procedural score and action sound effects automatically.</small></span>
-        </label>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="sectionHead">
-        <span class="step">02</span>
-        <div>
-          <h2>AI scene director</h2>
-          <p>Review the AI-directed shots, camera movement, transitions and continuity before generating the final video.</p>
-        </div>
-      </div>
-
-      <div class="sceneControls row wrap">
-        <label class="compactLabel" for="sceneCount">Scenes</label>
-        <select id="sceneCount">
-          <option>5</option>
-          <option selected>6</option>
-          <option>7</option>
-          <option>8</option>
-          <option>9</option>
-          <option>10</option>
-        </select>
-
-        <label class="compactLabel" for="visualStyle">Visual style</label>
-        <select id="visualStyle">
-          <option value="cinematic 3D animated film still">Cinematic 3D</option>
-          <option value="stylized realistic 3D folktale animation">3D folktale</option>
-          <option value="dramatic cinematic illustration">Cinematic illustration</option>
-          <option value="photorealistic cinematic still">Photorealistic</option>
-        </select>
-      </div>
-
-      <div id="scenes" class="scenesEmpty">Build a scene plan to begin.</div>
-
-      <div class="promptTip">
-        <strong>Character consistency:</strong>
-        Keep character descriptions consistent between images. Generate vertical 9:16 images without text or watermarks.
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="sectionHead">
-        <span class="step">03</span>
-        <div>
-          <h2>Reusable character library</h2>
-          <p>Save character designs on this device, edit their identities and choose which ones AHM should reuse in future plans.</p>
-        </div>
-      </div>
-
-      <label for="characterName">Character name</label>
-      <input id="characterName" maxlength="80" placeholder="e.g. Professor Nova">
-
-      <label for="characterDescription">Character identity and appearance</label>
-      <textarea id="characterDescription" rows="3" maxlength="1600" placeholder="Face, age, clothing, build, personality, voice and permanent visual details…"></textarea>
-
-      <div class="row wrap">
-        <button id="saveCharacterBtn" class="secondary">Save new character</button>
-        <button id="savePlanCharactersBtn" class="secondary" disabled>Save characters from current plan</button>
-      </div>
-      <div id="characterLibraryList" class="historyEmpty">Your saved characters will appear here.</div>
-    </section>
-
-    <section class="panel">
-      <div class="sectionHead">
-        <span class="step">04</span>
-        <div>
-          <h2>Render your video</h2>
-          <p>This preview is not the final video renderer. The finished AHM output must contain generated cinematic 3D footage, narration, synchronized subtitles, sound design and a downloadable MP4. The renderer is not connected yet.</p>
-        </div>
-      </div>
-
-      <div class="renderSettings row wrap">
-        <div>
-          <label for="fpsSelect">Frame rate</label>
-          <select id="fpsSelect">
-            <option value="24">24 fps</option>
-            <option value="30" selected>30 fps</option>
-          </select>
-        </div>
-
-        <div>
-          <label for="subtitleSize">Subtitle size</label>
-          <select id="subtitleSize">
-            <option value="small">Small</option>
-            <option value="medium" selected>Large</option>
-            <option value="large">Extra large</option>
-          </select>
-        </div>
-
-        <div>
-          <label for="musicVolume">Music volume</label>
-          <input id="musicVolume" type="range" min="0" max="35" value="12">
-          <span id="musicVolumeValue">12%</span>
-        </div>
-      </div>
-
-      <div class="renderPreview">
-        <canvas id="previewCanvas" width="360" height="640"></canvas>
-
-        <div class="previewInfo">
-          <strong id="previewTitle">Your video preview</strong>
-          <p id="previewCaption">Your AI Director plan will appear here. This is not a finished video.</p>
-          <div id="renderStatus" class="status">READY</div>
-          <div class="progressTrack"><div id="progressBar"></div></div>
-          <small id="progressText">0%</small>
-        </div>
-      </div>
-
-      <div class="row wrap renderButtons">
-        <button id="previewBtn" class="secondary">Preview storyboard motion (not final video)</button>
-        <button id="renderBtn" class="primary" disabled>Create AI Director plan first</button>
-        <button id="cancelBtn" class="secondary" disabled>Cancel</button>
-      </div>
-
-      <div id="downloadArea" class="downloadArea hidden"></div>
-
-      <p class="smallNote">
-        AHM verifies the exported file duration before offering a download. Some Android browsers export WebM rather than MP4.
-      </p>
-    </section>
-
-    <section class="panel">
-      <div class="sectionHead">
-        <span class="step">05</span>
-        <div>
-          <h2>Video history</h2>
-          <p>Videos saved in this browser on this device.</p>
-        </div>
-      </div>
-
-      <h3 class="subSectionTitle">Generated AI videos</h3>
-      <p class="hint">Your recent MP4 links are saved on this device. Secure links expire after 7 days, so download videos you want to keep.</p>
-      <div id="generatedVideoHistory" class="historyEmpty">Your generated MP4s will appear here.</div>
-
-      <h3 class="subSectionTitle">Local editor exports</h3>
-      <div id="historyList" class="historyEmpty">Your local editor renders will appear here.</div>
-
-      <button id="clearHistoryBtn" class="textButton">Clear local history</button>
-    </section>
-
-    <footer>AHM STUDIO · FREE-FIRST AI STORY VIDEO MAKER</footer>
-  </main>
-
-  <script src="/app.js?v=20261107-director-fix"></script>
-  <script src="/story-animation.js"></script>
-</body>
-        </html>
+  <section class="panel results" id="results" hidden><div class="section-title"><span class="step">04</span><div><h2>Your recap episodes</h2><p>Three separate MP4 exports, each in 3:4 format.</p></div></div><div id="episodeList"></div></section>
+  <footer>AHM MOVIES · Original-footage storytelling · You control the source movie and exports.</footer>
+</main>
+<script src="/app.js" defer></script>
+</body></html>
