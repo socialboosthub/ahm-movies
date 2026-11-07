@@ -1,8 +1,8 @@
 {
-  "name": "ahm-studio-free-editor",
-  "version": "8.1.0",
+  "name": "ahm-movies",
+  "version": "1.0.0",
   "private": true,
-  "description": "AHM Studio browser-based cinematic story editor",
+  "description": "AHM Movies — full-length movie recap editor",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
