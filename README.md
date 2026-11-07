@@ -1,17 +1,30 @@
 # AHM Movies
 
-Automatic movie recap creator: upload one full-length movie, analyse the complete story, create a faithful recap script, select matching shots from the original footage, generate narration and synchronized captions, then export three 3:4 MP4 episodes.
+Movie-to-recap editor using only footage from the uploaded original movie.
 
-## Current status
-The current web page is an upload and workflow preview. It supports local video selection, metadata preview, and playback. It does **not** yet upload or process the movie. AI analysis, shot matching, narration, subtitle timing, long-running video processing, storage, and MP4 exports require backend services that are not configured.
+## Implemented workflow
+1. Browser requests a short-lived Cloudflare R2 upload URL from Vercel.
+2. Browser uploads the full movie directly to R2, bypassing Vercel request-size limits.
+3. Vercel starts a background job on the separate processing worker.
+4. Worker downloads the full movie, extracts its audio with FFmpeg, and transcribes the entire film using faster-whisper.
+5. Transcript is summarized in chronological windows and sent to an OpenAI-compatible LLM (default Groq) to create timestamped recap beats that include the actual ending.
+6. Edge TTS generates narration; faster-whisper word timestamps from the generated narration drive subtitle phrase timing.
+7. FFmpeg selects only original movie footage by source timestamps, crops to 3:4, burns bold white uppercase italic subtitles, and creates three MP4 files.
+8. Exports are stored in R2 and returned as temporary download links.
 
-## Intended processing pipeline
-1. Upload original movie to durable object storage using resumable/multipart upload.
-2. Extract audio and scene/keyframe metadata with FFmpeg.
-3. Transcribe dialogue and analyse the complete timeline; build a timestamped story outline including the ending.
-4. Write narration grounded in those events and retrieve matching source timestamps.
-5. Generate narration audio; align captions to the generated narration.
-6. Use FFmpeg to cut only source-movie footage, mix narration, burn captions, render 3:4, and split into three narrative episodes.
-7. Store and provide three downloadable MP4s.
+## Deployment configuration
 
-Do not claim a recap is ready until the complete pipeline succeeds.
+### Cloudflare R2
+Create a private bucket and scoped read/write key. Configure on both Vercel and Render: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
+
+### Render worker
+Deploy `render.yaml` as a Blueprint. Set `RECAP_WORKER_TOKEN` to a long random secret, add `GROQ_API_KEY`, and configure the R2 values. The worker uses CPU faster-whisper (`small`, `int8`) by default; long movies may take significant time and need a persistent service with sufficient RAM/CPU.
+
+### Vercel
+Set `RECAP_WORKER_URL` to the Render service URL, plus the same `RECAP_WORKER_TOKEN` and R2 variables. Deploy the `feature/movie-recap-rebuild` branch as a Preview and test a movie before promoting to production.
+
+## Operational limitations
+- No paid service is activated by this repository. Groq/Render/R2 usage may incur charges according to the selected plans.
+- Worker job state is currently held in process memory; a worker restart during processing loses that job status.
+- Subtitle phrases use word-level timestamps from the generated voice audio.
+- Only process movies you have permission to use.
