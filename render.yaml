@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: ahm-movies-worker
+    runtime: docker
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: ./worker
+    healthCheckPath: /health
+    plan: starter
+    envVars:
+      - key: RECAP_WORKER_TOKEN
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: WHISPER_MODEL
+        value: small
+      - key: WHISPER_DEVICE
+        value: cpu
+      - key: WHISPER_COMPUTE_TYPE
+        value: int8
