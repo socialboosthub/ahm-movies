@@ -21,7 +21,7 @@ function updateStart(){$("startBtn").disabled=!state.file||state.uploading||stat
 function selectFile(file){
  if(!file)return;
  if(!allowed.has(file.type)){status("Unsupported file type. Choose MP4, MOV, MKV, WebM or MPEG.","error");return;}
- if(file.size>8*1024**3){status("This file is over the current 8 GB upload limit.","error");return;}
+ if(file.size>4.5*1024**3){status("This file is over the current 4.5 GB upload limit.","error");return;}
  state.file=file;$("fileTitle").textContent=file.name;$("fileMeta").textContent=bytes(file.size)+" · "+file.type;
  if(state.previewUrl)URL.revokeObjectURL(state.previewUrl);
  state.previewUrl=URL.createObjectURL(file);$("moviePreview").src=state.previewUrl;$("moviePreview").hidden=false;
