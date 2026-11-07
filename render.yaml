@@ -5,7 +5,7 @@ services:
     dockerfilePath: ./worker/Dockerfile
     dockerContext: ./worker
     healthCheckPath: /health
-    plan: starter
+    plan: free
     envVars:
       - key: RECAP_WORKER_TOKEN
         sync: false
