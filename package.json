@@ -1,14 +1,16 @@
 {
   "name": "ahm-movies",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "AHM Movies — full-length movie recap editor",
+  "description": "AHM Movies — original-footage movie recap editor",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.850.0",
+    "@aws-sdk/s3-request-presigner": "^3.850.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2"
   },
