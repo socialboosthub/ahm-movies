@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --check server.js && node --check public/app.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.850.0",
