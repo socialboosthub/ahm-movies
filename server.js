@@ -1,236 +1,123 @@
 require("dotenv").config();
-
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
-const { startStoryGeneration, getStoryGeneration, startExplainerGeneration, getExplainerGeneration, isStoryProviderConfigured } = require("./lib/providers/llm");
-const { startVideoJob, getVideoJob, isVideoProviderConfigured } = require("./lib/providers/video");
-const { generateFreeVoiceover } = require("./lib/providers/voice");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
-const rateLimitBuckets = new Map();
-app.set("trust proxy", 1);
 app.disable("x-powered-by");
-app.use(express.json({ limit: "2mb" }));
-
-function createRateLimiter(name, maxRequests, windowMs) {
-  return (req, res, next) => {
-    const now = Date.now();
-    const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown").split(",")[0].trim();
-    const key = name + ":" + ip;
-    let bucket = rateLimitBuckets.get(key);
-    if (!bucket || now >= bucket.resetAt) {
-      bucket = { count: 0, resetAt: now + windowMs };
-      rateLimitBuckets.set(key, bucket);
-    }
-    if (bucket.count >= maxRequests) {
-      const retrySeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-      res.set("Retry-After", String(retrySeconds));
-      return res.status(429).json({
-        ok: false,
-        error: "AHM is receiving too many requests from this connection. Please wait before trying again."
-      });
-    }
-    bucket.count++;
-    if (rateLimitBuckets.size > 5000) {
-      for (const [bucketKey, value] of rateLimitBuckets) {
-        if (now >= value.resetAt) rateLimitBuckets.delete(bucketKey);
-      }
-    }
-    next();
-  };
-}
-
-const limitExplainerPlans = createRateLimiter("explainer-plan", 8, 15 * 60 * 1000);
-const limitVideoJobs = createRateLimiter("video-job", 3, 10 * 60 * 1000);
-const limitStoryPlans = createRateLimiter("story-plan", 5, 15 * 60 * 1000);
-const limitVoiceover = createRateLimiter("free-voiceover", 5, 10 * 60 * 1000);
-
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public"), { maxAge: "1h" }));
 
-app.get("/api/health", (_req, res) => {
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024;
+const allowedTypes = new Set(["video/mp4","video/quicktime","video/x-matroska","video/webm","video/mpeg"]);
+const clean = value => String(value || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0,120);
+
+function storageConfig() {
+  const required = ["R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"];
+  const missing = required.filter(key => !process.env[key]);
+  if (missing.length) return { ready:false, missing };
+  return { ready:true };
+}
+function s3() {
+  return new S3Client({
+    region:"auto",
+    endpoint:`https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials:{ accessKeyId:process.env.R2_ACCESS_KEY_ID, secretAccessKey:process.env.R2_SECRET_ACCESS_KEY }
+  });
+}
+function workerReady() {
+  return Boolean(process.env.RECAP_WORKER_URL && process.env.RECAP_WORKER_TOKEN);
+}
+async function workerRequest(route, options={}) {
+  if (!workerReady()) {
+    const error = new Error("The movie-processing worker is not connected yet. Configure RECAP_WORKER_URL and RECAP_WORKER_TOKEN.");
+    error.statusCode=503; throw error;
+  }
+  const response = await fetch(new URL(route, process.env.RECAP_WORKER_URL), {
+    ...options,
+    headers:{ "content-type":"application/json", "x-ahm-worker-token":process.env.RECAP_WORKER_TOKEN, ...(options.headers||{}) },
+    signal:AbortSignal.timeout(15000)
+  });
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok) {
+    const error = new Error(data.detail || data.error || `Processing service returned ${response.status}`);
+    error.statusCode=response.status; throw error;
+  }
+  return data;
+}
+
+app.get("/api/recap/health", (_req,res) => {
+  const storage=storageConfig();
   res.json({
-    ok: true,
-    app: "AHM Studio",
-    version: "9.0.0",
-    storyProvider: isStoryProviderConfigured() ? "configured" : "not_configured",
-    videoProvider: isVideoProviderConfigured() ? "configured" : "not_configured",
-    voiceProvider: isStoryProviderConfigured() ? "configured" : "not_configured",
-    musicProvider: process.env.LYRIA_ENABLED === "true" && isVideoProviderConfigured() ? "enabled" : "optional_not_enabled"
+    ok:true,app:"AHM Movies",version:"2.0.0",
+    storage:storage.ready?"ready":"not_configured",
+    worker:workerReady()?"connected":"not_configured",
+    uploadMode:"direct-to-object-storage",
+    limits:{maxUploadBytes:MAX_UPLOAD_BYTES},
+    missing:[...storage.missing, ...(!workerReady()?["RECAP_WORKER_URL","RECAP_WORKER_TOKEN"]:[])]
   });
 });
 
-
-app.post("/api/free-voiceover", limitVoiceover, async (req, res) => {
+app.post("/api/recap/uploads", async (req,res) => {
   try {
-    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
-    const voice = typeof req.body?.voice === "string" ? req.body.voice : "Kore";
-    const style = typeof req.body?.style === "string" ? req.body.style : "";
-    if (!text) return res.status(400).json({ ok: false, error: "Add narration before generating a voice-over." });
-    if (text.length > 9000) return res.status(400).json({ ok: false, error: "Keep narration under 9,000 characters for this free voice request." });
-    const audio = await generateFreeVoiceover({ text, voice, style });
-    return res.json({ ok: true, ...audio });
-  } catch (error) {
-    const status = error.code === "VOICE_PROVIDER_NOT_CONFIGURED" ? 503 : (error.statusCode || 502);
-    console.error("AHM free voice-over failed:", error.message);
-    return res.status(status).json({ ok: false, error: error.message || "Could not generate the AI voice-over." });
+    const {filename,contentType,size}=req.body||{};
+    if (!filename || typeof filename!=="string") return res.status(400).json({ok:false,error:"Choose a movie file first."});
+    if (!allowedTypes.has(contentType)) return res.status(415).json({ok:false,error:"Use an MP4, MOV, MKV, WebM or MPEG video file."});
+    const bytes=Number(size);
+    if (!Number.isFinite(bytes)||bytes<=0||bytes>MAX_UPLOAD_BYTES) return res.status(400).json({ok:false,error:"Movie file must be between 1 byte and 8 GB."});
+    const storage=storageConfig();
+    if (!storage.ready) return res.status(503).json({ok:false,error:"Movie storage is not configured yet.",missing:storage.missing});
+    const key=`incoming/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${clean(filename)}`;
+    const uploadUrl=await getSignedUrl(s3(),new PutObjectCommand({
+      Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType,
+      Metadata:{originalname:clean(filename)}
+    }),{expiresIn:900});
+    res.json({ok:true,uploadUrl,objectKey:key,expiresIn:900});
+  } catch(error) {
+    console.error("upload signing failed",error.message);
+    res.status(error.statusCode||500).json({ok:false,error:error.message||"Could not prepare movie upload."});
   }
 });
 
-app.post("/api/explainer/plan", limitExplainerPlans, async (req, res) => {
+app.post("/api/recap/jobs", async (req,res) => {
   try {
-    const topic = typeof req.body?.topic === "string" ? req.body.topic.trim() : "";
-    const targetDuration = typeof req.body?.targetDuration === "string"
-      ? req.body.targetDuration.slice(0, 40) : "natural";
-    if (!topic) return res.status(400).json({ error: "Enter a topic or question for AHM to explain." });
-    if (topic.length > 6000) {
-      return res.status(400).json({ error: "Please keep your topic under 6,000 characters." });
-    }
-    const characterReferences = Array.isArray(req.body?.characterReferences)
-      ? req.body.characterReferences.slice(0, 8).filter(item =>
-          item && typeof item.name === "string" && typeof item.description === "string"
-        ).map(item => ({
-          name: item.name.trim().slice(0, 80),
-          description: item.description.trim().slice(0, 1600)
-        })).filter(item => item.name && item.description)
-      : [];
-    const result = await startExplainerGeneration(topic, targetDuration, characterReferences);
-    return res.status(202).json({
-      ok: true,
-      status: result.status || "in_progress",
-      jobId: result.id
-    });
-  } catch (error) {
-    const status = error.code === "STORY_PROVIDER_NOT_CONFIGURED" ? 503 : 502;
-    console.error("AHM explainer job start failed:", error.message);
-    return res.status(status).json({ error: error.message || "Could not start explainer planning." });
-  }
-});
-
-app.post("/api/explainer/video", limitVideoJobs, async (req, res) => {
-  try {
-    const story = req.body?.story;
-    if (!story || !Array.isArray(story.scenes) || !story.scenes.length) {
-      return res.status(400).json({ ok: false, error: "Generate a complete AI Director plan before creating the video." });
-    }
-    const hasSpokenContent = Boolean(String(story.narration || "").trim()) ||
-      story.scenes.some(scene =>
-        Boolean(String(scene.narration || "").trim()) ||
-        (Array.isArray(scene.dialogue) && scene.dialogue.some(line =>
-          line && typeof line === "object" && String(line.line || line.text || "").trim()
-        ))
-      );
-    if (!story.title || !hasSpokenContent) {
-      return res.status(400).json({ ok: false, error: "The AI Director plan needs a title and at least one narration or dialogue line." });
-    }
-    const allowedVoices = new Set(["Charon", "Kore", "Puck", "Aoede", "Fenrir", "Zephyr", "Leda", "Orus"]);
-    const voice = typeof req.body?.voice === "string" ? req.body.voice : "Charon";
-    if (!allowedVoices.has(voice)) {
-      return res.status(400).json({ ok: false, error: "Choose a supported AHM narrator voice." });
-    }
-    const musicEnabled = req.body?.musicEnabled === true;
-    if (musicEnabled && process.env.LYRIA_ENABLED !== "true") {
-      return res.status(503).json({
-        ok: false,
-        error: "Original background music is selected, but Lyria is not enabled for this deployment. It is a paid music service and must be explicitly configured first."
-      });
-    }
-    const requestedMusicVolume = Number(req.body?.musicVolume ?? 12);
-    const musicVolume = Number.isFinite(requestedMusicVolume)
-      ? Math.min(35, Math.max(0, requestedMusicVolume)) / 100
-      : 0.12;
-    const productionStory = {
-      ...story,
-      productionSettings: { voice, musicEnabled, musicVolume }
+    const {objectKey,filename,settings}=req.body||{};
+    if (typeof objectKey!=="string"||!objectKey.startsWith("incoming/")) return res.status(400).json({ok:false,error:"Upload the movie before starting its recap."});
+    const safeSettings={
+      aspectRatio:"3:4",
+      targetMinutes:Math.min(6,Math.max(5,Number(settings?.targetMinutes)||5.5)),
+      parts:3,
+      voice:String(settings?.voice||"en-US-AndrewNeural").slice(0,80),
+      pace:Math.min(1.15,Math.max(0.85,Number(settings?.pace)||1)),
+      subtitleStyle:"bold-white-all-caps-italic-shadow",
+      subtitlePosition:"lower-middle",
+      language:String(settings?.language||"English").slice(0,40)
     };
-    const jobId = crypto.randomUUID();
-    const job = await startVideoJob({ jobId, story: productionStory });
-    return res.status(202).json({ ok: true, jobId: job.id, status: job.status });
-  } catch (error) {
-    const status = error.code === "VIDEO_PROVIDER_NOT_CONFIGURED" ? 503 : 502;
-    console.error("AHM video job start failed:", error.message);
-    return res.status(status).json({ ok: false, error: error.message || "Could not start cinematic video generation." });
+    const job=await workerRequest("/jobs",{method:"POST",body:JSON.stringify({object_key:objectKey,filename:clean(filename),settings:safeSettings})});
+    res.status(202).json({ok:true,...job});
+  } catch(error) {
+    console.error("job start failed",error.message);
+    res.status(error.statusCode||503).json({ok:false,error:error.message});
   }
 });
 
-app.get("/api/explainer/video/:jobId", async (req, res) => {
+app.get("/api/recap/jobs/:id", async (req,res) => {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(req.params.id)) return res.status(400).json({ok:false,error:"Invalid job ID."});
   try {
-    const jobId = String(req.params.jobId || "");
-    if (!/^[A-Za-z0-9_-]{8,512}$/.test(jobId)) {
-      return res.status(400).json({ ok: false, error: "Invalid video job ID." });
-    }
-    const result = await getVideoJob(jobId);
-    return res.json({ ok: true, ...result });
-  } catch (error) {
-    console.error("AHM video job status failed:", error.message);
-    return res.status(502).json({ ok: false, error: error.message || "Could not check video generation status." });
+    const job=await workerRequest(`/jobs/${encodeURIComponent(req.params.id)}`);
+    res.json({ok:true,...job});
+  } catch(error) {
+    res.status(error.statusCode||503).json({ok:false,error:error.message});
   }
 });
 
-app.get("/api/explainer/plan/:jobId", async (req, res) => {
-  try {
-    const result = await getExplainerGeneration(req.params.jobId);
-    if (result.status !== "completed") return res.json({ ok: true, status: result.status });
-    return res.json({
-      ok: true,
-      status: "completed",
-      story: result.story,
-      video: isVideoProviderConfigured()
-        ? { status: "ready", message: "The production worker is connected. You can generate the complete cinematic MP4." }
-        : { status: "not_configured", message: "The AI plan is ready, but the RunPod video worker and storage must be configured before rendering." }
-    });
-  } catch (error) {
-    console.error("AHM explainer job check failed:", error.message);
-    return res.status(502).json({ error: error.message || "Could not check explainer generation." });
-  }
-});
-
-app.post("/api/story/plan", limitStoryPlans, async (req, res) => {
-  try {
-    const idea = typeof req.body?.idea === "string" ? req.body.idea.trim() : "";
-    const targetDuration = typeof req.body?.targetDuration === "string"
-      ? req.body.targetDuration.slice(0, 40) : "natural";
-    if (idea.length > 6000) {
-      return res.status(400).json({ error: "Please keep your story idea under 6,000 characters." });
-    }
-    const job = await startStoryGeneration(idea, targetDuration);
-    return res.status(202).json({ ok: true, jobId: job.id, status: job.status });
-  } catch (error) {
-    const status = error.code === "STORY_PROVIDER_NOT_CONFIGURED" ? 503 : 502;
-    console.error("AHM story job start failed:", error.message);
-    return res.status(status).json({ error: error.message || "Could not start story planning." });
-  }
-});
-
-app.get("/api/story/plan/:jobId", async (req, res) => {
-  try {
-    const result = await getStoryGeneration(req.params.jobId);
-    if (result.status !== "completed") return res.json({ ok: true, status: result.status });
-    return res.json({
-      ok: true,
-      status: "completed",
-      story: result.story,
-      video: isVideoProviderConfigured()
-        ? { status: "ready", message: "The production worker is connected. You can generate the complete cinematic MP4." }
-        : { status: "not_configured", message: "The story plan is ready, but the RunPod video worker and storage must be configured before rendering." }
-    });
-  } catch (error) {
-    console.error("AHM story job check failed:", error.message);
-    return res.status(502).json({ error: error.message || "Could not check story generation." });
-  }
-});
-
-app.use("/api", (_req, res) => {
-  res.status(404).json({ error: "API route not found." });
-});
-
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-if (require.main === module) {
-  const port = Number(process.env.PORT || 3000);
-  app.listen(port, "0.0.0.0", () => console.log(`AHM Studio running on port ${port}`));
+app.use("/api",(req,res)=>res.status(404).json({ok:false,error:"API route not found."}));
+app.get("*",(_req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+if (require.main===module) {
+  const port=Number(process.env.PORT||3000);
+  app.listen(port,"0.0.0.0",()=>console.log(`AHM Movies API listening on ${port}`));
 }
-
-module.exports = app;
+module.exports=app;
