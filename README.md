@@ -28,3 +28,7 @@ Set `RECAP_WORKER_URL` to the Render service URL, plus the same `RECAP_WORKER_TO
 - Worker job state is currently held in process memory; a worker restart during processing loses that job status.
 - Subtitle phrases use word-level timestamps from the generated voice audio.
 - Only process movies you have permission to use.
+
+
+### Cloudflare R2 browser upload CORS
+In the R2 bucket CORS settings, allow your deployed AHM Movies origin (and the Vercel preview origin while testing), method `PUT`, and request header `Content-Type`. Expose the `ETag` response header if your browser tooling needs it. Keep the bucket private; the app uses signed upload and download URLs.
