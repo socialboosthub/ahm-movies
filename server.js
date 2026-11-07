@@ -11,7 +11,7 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public"), { maxAge: "1h" }));
 
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024 * 1024;
 const allowedTypes = new Set(["video/mp4","video/quicktime","video/x-matroska","video/webm","video/mpeg"]);
 const clean = value => String(value || "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0,120);
 
@@ -67,15 +67,15 @@ app.post("/api/recap/uploads", async (req,res) => {
     if (!filename || typeof filename!=="string") return res.status(400).json({ok:false,error:"Choose a movie file first."});
     if (!allowedTypes.has(contentType)) return res.status(415).json({ok:false,error:"Use an MP4, MOV, MKV, WebM or MPEG video file."});
     const bytes=Number(size);
-    if (!Number.isFinite(bytes)||bytes<=0||bytes>MAX_UPLOAD_BYTES) return res.status(400).json({ok:false,error:"Movie file must be between 1 byte and 8 GB."});
+    if (!Number.isFinite(bytes)||bytes<=0||bytes>MAX_UPLOAD_BYTES) return res.status(400).json({ok:false,error:"Movie file must be between 1 byte and 4.5 GB."});
     const storage=storageConfig();
     if (!storage.ready) return res.status(503).json({ok:false,error:"Movie storage is not configured yet.",missing:storage.missing});
     const key=`incoming/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${clean(filename)}`;
     const uploadUrl=await getSignedUrl(s3(),new PutObjectCommand({
       Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType,
       Metadata:{originalname:clean(filename)}
-    }),{expiresIn:900});
-    res.json({ok:true,uploadUrl,objectKey:key,expiresIn:900});
+    }),{expiresIn:3600});
+    res.json({ok:true,uploadUrl,objectKey:key,expiresIn:3600});
   } catch(error) {
     console.error("upload signing failed",error.message);
     res.status(error.statusCode||500).json({ok:false,error:error.message||"Could not prepare movie upload."});
