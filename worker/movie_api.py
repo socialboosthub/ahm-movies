@@ -88,7 +88,7 @@ def subtitles(audio,text,path):
  path.write_text("\n".join(blocks),encoding="utf-8")
 def render(movie,audio,srt,start,end,out):
  vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=46,Bold=1,Italic=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=4,Shadow=2,Alignment=2,MarginV=170'"
- run(["ffmpeg","-y","-ss",str(start),"-i",str(movie),"-i",str(audio),"-vf",vf,"-map","0:v:0","-map","1:a:0","-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","23","-c:a","aac","-b:a","160k","-shortest","-movflags","+faststart",str(out)])
+ run(["ffmpeg","-y","-ss",str(start),"-t",str(max(1.0,end-start)),"-i",str(movie),"-i",str(audio),"-vf",vf,"-map","0:v:0","-map","1:a:0","-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","23","-c:a","aac","-b:a","160k","-shortest","-movflags","+faststart",str(out)])
 def download_url(s3,key):
  return s3.generate_presigned_url("get_object",Params={"Bucket":os.environ["R2_BUCKET"],"Key":key},ExpiresIn=604800)
 async def process(job_id,payload):
