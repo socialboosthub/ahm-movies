@@ -50,26 +50,36 @@ async def plan_recap(rows,duration,settings):
  chunks=[];buf=[];size=0
  for row in rows:
   line=f"[{row['start']:.1f}-{row['end']:.1f}] {row['text']}"
-  if size+len(line)>9500 and buf:chunks.append("\n".join(buf));buf=[];size=0
+  if size+len(line)>9500 and buf:chunks.append("\\n".join(buf));buf=[];size=0
   buf.append(line);size+=len(line)
- if buf:chunks.append("\n".join(buf))
+ if buf:chunks.append("\\n".join(buf))
  evidence=[]
  for i,chunk in enumerate(chunks):
-  data=await ask(f"Summarize this chronological part {i+1}/{len(chunks)} of a {duration/60:.1f}-minute movie. Keep all character names, causes, motives, reveals and ending clues. Do not invent. Return JSON {{\"summary\":\"...\",\"events\":[{{\"time\":0,\"event\":\"...\",\"characters\":[...]}}]}}.\n{chunk}")
+  data=await ask(f"Summarize this chronological part {i+1}/{len(chunks)} of a {duration/60:.1f}-minute movie. Keep all character names, causes, motives, reveals and ending clues. Do not invent. Return JSON {{\\"summary\\":\\"...\\",\\"events\\":[{{\\"time\\":0,\\"event\\":\\"...\\",\\"characters\\":[...]}}]}}.\\n{chunk}")
   evidence.append(data)
- prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax and complete ending. Do not withhold the ending for suspense. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}"""
- result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth and include the entire ending.")
+ ending_rows=rows[-max(12,min(40,len(rows))):]
+ ending_text="\\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
+ prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; at least the final segment must select a source window from the final 5 percent of the movie. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
+ result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending.")
  segments=result.get("segments",[])
  valid=[]
  for x in segments:
   try:p=int(x.get("part",1));a=float(x["source_start"]);b=float(x["source_end"])
   except Exception:continue
   if p in (1,2,3) and 0<=a<duration and a<b:
-   x["part"]=p;x["source_start"]=a;x["source_end"]=min(duration,b);valid.append(x)
+   x["part"]=p;x["source_start"]=a;x["source_end"]=min(duration,max(a+min(5,duration-a),min(b,a+25)));valid.append(x)
  if len(valid)<12:raise RuntimeError("The recap model did not return enough valid source-timestamped scenes. Retry the job.")
  valid.sort(key=lambda x:(x["part"],x["source_start"]))
- if not any(x["part"]==3 for x in valid):valid[-1]["part"]=3
+ counts={p:sum(1 for x in valid if x["part"]==p) for p in (1,2,3)}
+ if any(counts[p]<3 for p in (1,2,3)):
+  raise RuntimeError("The recap plan did not create three complete story parts. Retry the job.")
+ # Keep the ending tied to the final portion of the source film.
+ ending=max((x for x in valid if x["part"]==3),key=lambda x:x["source_start"])
+ if ending["source_start"] < duration*0.95:
+  ending["source_start"]=max(0,duration-25)
+  ending["source_end"]=duration
  return {"title":result.get("title","Movie Recap"),"segments":valid}
+
 def stamp(t):
  ms=max(0,int(t*1000));h=ms//3600000;ms%=3600000;m=ms//60000;ms%=60000;s=ms//1000;ms%=1000
  return f"{h:02}:{m:02}:{s:02},{ms:03}"
@@ -86,9 +96,18 @@ def subtitles(audio,text,path):
   group=words[i:i+4];phrase=" ".join(w["word"] for w in group).upper()
   blocks.append(f"{len(blocks)+1}\n{stamp(group[0]['start'])} --> {stamp(max(group[0]['start']+.2,group[-1]['end']))}\n{phrase}\n")
  path.write_text("\n".join(blocks),encoding="utf-8")
-def render(movie,audio,srt,start,end,out):
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=46,Bold=1,Italic=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=4,Shadow=2,Alignment=2,MarginV=170'"
- run(["ffmpeg","-y","-ss",str(start),"-t",str(max(1.0,end-start)),"-i",str(movie),"-i",str(audio),"-vf",vf,"-map","0:v:0","-map","1:a:0","-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","23","-c:a","aac","-b:a","160k","-shortest","-movflags","+faststart",str(out)])
+def render(movie,audio,srt,start,end,out,has_source_audio=True):
+ clip_duration=max(1.0,end-start)
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\\\:")+":force_style='FontName=DejaVu Sans,FontSize=46,Bold=1,Italic=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=4,Shadow=2,Alignment=2,MarginV=170,WrapStyle=2,Spacing=1'"
+ cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
+ if has_source_audio:
+  mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
+  cmd += ["-filter_complex",mix,"-map","0:v:0","-map","[aout]"]
+ else:
+  cmd += ["-map","0:v:0","-map","1:a:0"]
+ cmd += ["-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","22","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)]
+ run(cmd)
+
 def download_url(s3,key):
  return s3.generate_presigned_url("get_object",Params={"Bucket":os.environ["R2_BUCKET"],"Key":key},ExpiresIn=604800)
 async def process(job_id,payload):
@@ -97,7 +116,8 @@ async def process(job_id,payload):
   s3=store();settings=payload.get("settings",{});movie=tmp/"movie"
   update(job_id,status="running",stage="Downloading original movie",progress=2)
   s3.download_file(os.environ["R2_BUCKET"],payload["object_key"],str(movie))
-  probe=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration","-of","json",str(movie)]));duration=float(probe["format"]["duration"])
+  probe=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type","-of","json",str(movie)]));duration=float(probe["format"]["duration"])
+  has_source_audio=any(stream.get("codec_type")=="audio" for stream in probe.get("streams",[]))
   if duration<60:raise RuntimeError("The uploaded file is too short to be a full movie.")
   if duration>14400:raise RuntimeError("The current maximum movie length is four hours.")
   audio=tmp/"full_audio.wav";update(job_id,stage="Extracting complete movie audio",progress=7)
@@ -117,7 +137,7 @@ async def process(job_id,payload):
    audio_file=tmp/f"voice_{i:03}.mp3";srt=tmp/f"subs_{i:03}.srt";clip=tmp/f"clip_{i:03}.mp4"
    await tts(narration,voice,float(settings.get("pace",1)),audio_file)
    subtitles(audio_file,narration,srt)
-   render(movie,audio_file,srt,float(scene["source_start"]),float(scene["source_end"]),clip)
+   render(movie,audio_file,srt,float(scene["source_start"]),float(scene["source_end"]),clip,has_source_audio)
    part=int(scene["part"]);clips[part].append(clip)
    durations[part]+=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(clip)]).strip())
    update(job_id,stage=f"Editing original footage · scene {i+1}/{total}",progress=45+int((i+1)/total*48))
@@ -129,8 +149,15 @@ async def process(job_id,payload):
    out=tmp/f"AHM_Movies_Part_{part}.mp4"
    run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-c","copy","-movflags","+faststart",str(out)])
    key=f"exports/{job_id}/AHM_Movies_Part_{part}.mp4"
+   qc=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(out)]))
+   video_stream=next((x for x in qc.get("streams",[]) if x.get("codec_type")=="video"),None)
+   audio_stream=next((x for x in qc.get("streams",[]) if x.get("codec_type")=="audio"),None)
+   if not video_stream or not audio_stream or video_stream.get("width")!=1080 or video_stream.get("height")!=1440:
+    raise RuntimeError(f"Part {part} failed final video/audio/resolution quality checks.")
+   seconds=int(float(qc["format"]["duration"]))
+   if seconds<20:raise RuntimeError(f"Part {part} is unexpectedly short; refusing to export an incomplete episode.")
    s3.upload_file(str(out),os.environ["R2_BUCKET"],key,ExtraArgs={"ContentType":"video/mp4"})
-   seconds=int(durations[part]);episodes.append({"title":f"Part {part}","part":part,"duration":f"{seconds//60}:{seconds%60:02}","download_url":download_url(s3,key)})
+   episodes.append({"title":f"Part {part}","part":part,"duration":f"{seconds//60}:{seconds%60:02}","download_url":download_url(s3,key)})
   update(job_id,status="completed",stage="Three recap episodes ready",progress=100,episodes=episodes,recap_script=recap)
  except Exception as exc:update(job_id,status="failed",stage="Processing failed",error=str(exc)[:1200])
  finally:shutil.rmtree(tmp,ignore_errors=True)
