@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
@@ -117,6 +117,78 @@ app.post("/api/recap/browser-test/cleanup", async (req,res) => {
   } catch(error) {
     console.warn("browser upload test cleanup failed",error.name,error.message);
     res.status(500).json({ok:false,error:"Diagnostic cleanup failed."});
+  }
+});
+
+app.post("/api/recap/multipart/create", async (req,res) => {
+  try {
+    const {filename,contentType,size}=req.body||{};
+    const bytes=Number(size);
+    if (!filename || typeof filename!=="string" || !allowedTypes.has(contentType))
+      return res.status(400).json({ok:false,error:"Choose a supported movie file."});
+    if (!Number.isFinite(bytes)||bytes<=0||bytes>MAX_UPLOAD_BYTES)
+      return res.status(400).json({ok:false,error:"Movie file must be between 1 byte and 4.5 GB."});
+    const storage=storageConfig();
+    if (!storage.ready) return res.status(503).json({ok:false,error:"Movie storage is not configured."});
+    const key=`incoming/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${clean(filename)}`;
+    const created=await s3().send(new CreateMultipartUploadCommand({
+      Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType
+    }));
+    if (!created.UploadId) throw new Error("R2 did not return a multipart upload ID.");
+    res.json({ok:true,objectKey:key,uploadId:created.UploadId,partSize:16*1024*1024});
+  } catch(error) {
+    console.error("multipart upload creation failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Could not start the secure multipart upload."});
+  }
+});
+app.post("/api/recap/multipart/part-url", async (req,res) => {
+  try {
+    const {objectKey,uploadId,partNumber}=req.body||{};
+    const number=Number(partNumber);
+    if (typeof objectKey!=="string" || !objectKey.startsWith("incoming/") ||
+        typeof uploadId!=="string" || uploadId.length<8 || uploadId.length>512 ||
+        !Number.isInteger(number) || number<1 || number>10000)
+      return res.status(400).json({ok:false,error:"Invalid multipart upload part."});
+    const uploadUrl=await getSignedUrl(s3(),new UploadPartCommand({
+      Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId,PartNumber:number
+    }),{expiresIn:3600});
+    res.json({ok:true,uploadUrl});
+  } catch(error) {
+    console.error("multipart part signing failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Could not prepare the next upload part."});
+  }
+});
+app.post("/api/recap/multipart/complete", async (req,res) => {
+  try {
+    const {objectKey,uploadId,parts}=req.body||{};
+    if (typeof objectKey!=="string" || !objectKey.startsWith("incoming/") ||
+        typeof uploadId!=="string" || uploadId.length<8 ||
+        !Array.isArray(parts) || parts.length<1 || parts.length>10000)
+      return res.status(400).json({ok:false,error:"Invalid multipart completion request."});
+    const normalized=parts.map(part=>({PartNumber:Number(part.PartNumber),ETag:String(part.ETag||"")}))
+      .sort((a,b)=>a.PartNumber-b.PartNumber);
+    if (normalized.some((part,index)=>!Number.isInteger(part.PartNumber)||part.PartNumber!==index+1||!part.ETag))
+      return res.status(400).json({ok:false,error:"Upload parts are incomplete or out of order."});
+    await s3().send(new CompleteMultipartUploadCommand({
+      Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId,MultipartUpload:{Parts:normalized}
+    }));
+    res.json({ok:true,objectKey});
+  } catch(error) {
+    console.error("multipart completion failed",error.name,error.message);
+    res.status(502).json({ok:false,error:"R2 could not assemble the uploaded movie parts. Retry the upload."});
+  }
+});
+app.post("/api/recap/multipart/abort", async (req,res) => {
+  try {
+    const {objectKey,uploadId}=req.body||{};
+    if (typeof objectKey!=="string" || !objectKey.startsWith("incoming/") ||
+        typeof uploadId!=="string" || uploadId.length<8)
+      return res.status(400).json({ok:false,error:"Invalid multipart abort request."});
+    await s3().send(new AbortMultipartUploadCommand({Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId}));
+    res.json({ok:true});
+  } catch(error) {
+    console.warn("multipart abort failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Could not cancel the multipart upload."});
   }
 });
 
