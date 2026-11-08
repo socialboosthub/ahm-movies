@@ -120,7 +120,7 @@ app.post("/api/recap/browser-test/complete", async (req,res) => {
 });
 app.post("/api/recap/browser-test/report", (req,res) => {
   const result=String(req.body?.result||"unknown").slice(0,20);
-  const message=String(req.body?.message||"").replace(/[\\r\\n]/g," ").slice(0,240);
+  const message=String(req.body?.message||"").replace(/[\r\n]/g," ").slice(0,240);
   console.info("AHM browser upload check",JSON.stringify({
     result,
     message,
