@@ -85,7 +85,7 @@ async function multipartUpload(file){
   for(let partNumber=1;partNumber<=count;partNumber++){
    const begin=(partNumber-1)*partSize,end=Math.min(file.size,begin+partSize),blob=file.slice(begin,end);
    let result=null,lastError=null;
-   for(let attempt=1;attempt<=5&&!result;attempt++){
+   for(let attempt=1;attempt<=8&&!result;attempt++){
     try{
      // Request a fresh signed URL for every attempt; never reuse a URL after
      // a browser/network interruption.
@@ -96,12 +96,12 @@ async function multipartUpload(file){
        $("uploadBar").style.width=pct+"%";
        $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
-     },8*60*1000);
+     },15*60*1000);
     }catch(error){
      lastError=error;
-     if(attempt<5){
-      const delay=Math.min(10000,1000*(2**(attempt-1)));
-      $("uploadLabel").textContent="Part "+partNumber+" interrupted · renewing connection ("+attempt+"/4)…";
+     if(attempt<8){
+      const delay=Math.min(15000,1500*(2**(attempt-1)));
+      $("uploadLabel").textContent="Part "+partNumber+" interrupted · renewing connection ("+attempt+"/7)…";
       await new Promise(resolve=>setTimeout(resolve,delay));
      }
     }
