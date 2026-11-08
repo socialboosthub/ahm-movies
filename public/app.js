@@ -76,6 +76,9 @@ function xhrPut(url,blob,contentType,onProgress,timeout=15*60*1000){
   xhr.send(blob);
  });
 }
+async function multipartReport(data){
+ return api("/api/recap/multipart/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...data,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
+}
 async function multipartUpload(file){
  const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
  const partSize=Number(created.partSize)||16*1024*1024;
@@ -86,7 +89,9 @@ async function multipartUpload(file){
    const begin=(partNumber-1)*partSize,end=Math.min(file.size,begin+partSize),blob=file.slice(begin,end);
    let result=null,lastError=null;
    for(let attempt=1;attempt<=8&&!result;attempt++){
+    const attemptStarted=Date.now();
     try{
+     await multipartReport({stage:"part-start",part:partNumber,total:count,attempt,size:blob.size});
      // Request a fresh signed URL for every attempt; never reuse a URL after
      // a browser/network interruption.
      const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber})});
@@ -97,8 +102,10 @@ async function multipartUpload(file){
        $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
      },15*60*1000);
+     await multipartReport({stage:"part-success",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted});
     }catch(error){
      lastError=error;
+     await multipartReport({stage:"part-failed",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted,message:error.message});
      if(attempt<8){
       const delay=Math.min(15000,1500*(2**(attempt-1)));
       $("uploadLabel").textContent="Part "+partNumber+" interrupted · renewing connection ("+attempt+"/7)…";
