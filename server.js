@@ -9,7 +9,13 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public"), { maxAge: "1h" }));
+app.use(express.static(path.join(__dirname, "public"), {
+  maxAge:"1h",
+  setHeaders(res,filePath) {
+    if ([".html",".js",".css"].includes(path.extname(filePath).toLowerCase()))
+      res.setHeader("Cache-Control","no-cache, must-revalidate");
+  }
+}));
 
 const MAX_UPLOAD_BYTES = 4.5 * 1024 * 1024 * 1024;
 const allowedTypes = new Set(["video/mp4","video/quicktime","video/x-matroska","video/webm","video/mpeg"]);
@@ -76,62 +82,6 @@ app.get("/api/recap/health", async (_req,res) => {
   });
 });
 
-app.get("/api/recap/diagnostic", async (_req,res) => {
-  const storage=storageConfig();
-  if (!storage.ready) return res.status(503).json({ok:false,stage:"configuration",missing:storage.missing});
-  try {
-    const client=s3();
-    const key=`diagnostics/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.txt`;
-    await client.send(new PutObjectCommand({
-      Bucket:process.env.R2_BUCKET,Key:key,Body:Buffer.from("AHM Movies R2 diagnostic"),ContentType:"text/plain"
-    }));
-    await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:key}));
-    const contentType="video/mp4";
-    const signedUrl=await getSignedUrl(client,new PutObjectCommand({
-      Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType
-    }),{expiresIn:300});
-    const origin="https://ahm-movies-git-feature-movie-recap-5b9415-aidarushamza9727-3554.vercel.app";
-    const preflight=await fetch(signedUrl,{
-      method:"OPTIONS",
-      headers:{
-        Origin:origin,
-        "Access-Control-Request-Method":"PUT",
-        "Access-Control-Request-Headers":"content-type"
-      },
-      signal:AbortSignal.timeout(15000)
-    });
-    const cors={
-      status:preflight.status,
-      allowOrigin:preflight.headers.get("access-control-allow-origin"),
-      allowMethods:preflight.headers.get("access-control-allow-methods"),
-      allowHeaders:preflight.headers.get("access-control-allow-headers")
-    };
-    const corsOk=cors.allowOrigin===origin &&
-      (cors.allowMethods||"").toUpperCase().split(/[,\\s]+/).includes("PUT") &&
-      (cors.allowHeaders||"").toLowerCase().split(/[,\\s]+/).includes("content-type");
-    const testBody=Buffer.from("AHM Movies signed browser upload diagnostic");
-    const put=await fetch(signedUrl,{
-      method:"PUT",
-      headers:{Origin:origin,"Content-Type":contentType},
-      body:testBody,
-      signal:AbortSignal.timeout(20000)
-    });
-    const putText=await put.text();
-    if (put.ok) await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:key}));
-    return res.json({
-      ok:true,
-      storage:"write_delete_passed",
-      corsPreflight:cors,
-      corsOk,
-      signedPut:{status:put.status,ok:put.ok,response:putText.slice(0,500)},
-      message:put.ok?"R2 credentials, CORS preflight, and signed PUT all passed.":"R2 CORS preflight passed, but the signed PUT failed."
-    });
-  } catch(error) {
-    console.error("R2 diagnostic failed",error.name,error.message);
-    return res.status(502).json({ok:false,stage:"r2_or_cors_test",error:error.name||"StorageError",message:"R2 diagnostic failed. Check storage settings."});
-  }
-});
-
 app.post("/api/recap/browser-test", async (_req,res) => {
   try {
     const storage=storageConfig();
@@ -145,6 +95,17 @@ app.post("/api/recap/browser-test", async (_req,res) => {
     console.error("browser upload test signing failed",error.name,error.message);
     res.status(500).json({ok:false,error:"Could not prepare browser upload test."});
   }
+});
+app.post("/api/recap/browser-test/report", (req,res) => {
+  const result=String(req.body?.result||"unknown").slice(0,20);
+  const message=String(req.body?.message||"").replace(/[\\r\\n]/g," ").slice(0,240);
+  console.info("AHM browser upload check",JSON.stringify({
+    result,
+    message,
+    online:req.body?.online===true,
+    userAgent:String(req.body?.userAgent||"").slice(0,180)
+  }));
+  res.json({ok:true});
 });
 app.post("/api/recap/browser-test/cleanup", async (req,res) => {
   const objectKey=String(req.body?.objectKey||"");
