@@ -216,6 +216,16 @@ app.post("/api/recap/multipart/abort", async (req,res) => {
   }
 });
 
+app.post("/api/recap/multipart/report", (req,res) => {
+ const b=req.body||{};
+ console.info("AHM multipart browser event",JSON.stringify({
+  stage:String(b.stage||"unknown").slice(0,20),part:Number(b.part)||0,total:Number(b.total)||0,
+  attempt:Number(b.attempt)||0,size:Number(b.size)||0,elapsedMs:Number(b.elapsedMs)||0,
+  online:b.online===true,message:String(b.message||"").replace(/[\\r\\n]/g," ").slice(0,220),
+  userAgent:String(b.userAgent||"").slice(0,180)
+ }));
+ res.json({ok:true});
+});
 app.post("/api/recap/uploads", async (req,res) => {
   try {
     const {filename,contentType,size}=req.body||{};
