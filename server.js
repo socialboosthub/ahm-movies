@@ -86,14 +86,36 @@ app.post("/api/recap/browser-test", async (_req,res) => {
   try {
     const storage=storageConfig();
     if (!storage.ready) return res.status(503).json({ok:false,error:"Storage is not configured."});
+    const client=s3();
     const objectKey=`diagnostics/browser/${Date.now()}-${crypto.randomUUID()}.mp4`;
-    const uploadUrl=await getSignedUrl(s3(),new PutObjectCommand({
+    const created=await client.send(new CreateMultipartUploadCommand({
       Bucket:process.env.R2_BUCKET,Key:objectKey,ContentType:"video/mp4"
+    }));
+    const uploadUrl=await getSignedUrl(client,new UploadPartCommand({
+      Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:created.UploadId,PartNumber:1
     }),{expiresIn:600});
-    res.json({ok:true,uploadUrl,objectKey});
+    res.json({ok:true,uploadUrl,objectKey,uploadId:created.UploadId});
   } catch(error) {
-    console.error("browser upload test signing failed",error.name,error.message);
-    res.status(500).json({ok:false,error:"Could not prepare browser upload test."});
+    console.error("browser multipart test signing failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Could not prepare browser multipart test."});
+  }
+});
+app.post("/api/recap/browser-test/complete", async (req,res) => {
+  const objectKey=String(req.body?.objectKey||"");
+  const uploadId=String(req.body?.uploadId||"");
+  const etag=String(req.body?.etag||"");
+  if (!objectKey.startsWith("diagnostics/browser/") || !objectKey.endsWith(".mp4") ||
+      objectKey.includes("..") || !uploadId || !etag)
+    return res.status(400).json({ok:false,error:"Invalid browser multipart completion."});
+  try {
+    await s3().send(new CompleteMultipartUploadCommand({
+      Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId,
+      MultipartUpload:{Parts:[{PartNumber:1,ETag:etag}]}
+    }));
+    res.json({ok:true});
+  } catch(error) {
+    console.warn("browser multipart completion failed",error.name,error.message);
+    res.status(502).json({ok:false,error:"Browser multipart completion failed."});
   }
 });
 app.post("/api/recap/browser-test/report", (req,res) => {
@@ -112,6 +134,8 @@ app.post("/api/recap/browser-test/cleanup", async (req,res) => {
   if (!objectKey.startsWith("diagnostics/browser/") || !objectKey.endsWith(".mp4") || objectKey.includes("..") || objectKey.includes("\\\\"))
     return res.status(400).json({ok:false,error:"Invalid diagnostic object key."});
   try {
+    const uploadId=String(req.body?.uploadId||"");
+    if(uploadId) await s3().send(new AbortMultipartUploadCommand({Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId})).catch(()=>{});
     await s3().send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:objectKey}));
     res.json({ok:true});
   } catch(error) {
