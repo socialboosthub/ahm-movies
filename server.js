@@ -82,49 +82,6 @@ app.get("/api/recap/health", async (_req,res) => {
   });
 });
 
-app.get("/api/recap/multipart/diagnostic", async (_req,res) => {
-  const client=s3();
-  const objectKey=`diagnostics/server/${Date.now()}-${crypto.randomUUID()}.mp4`;
-  let uploadId=null,completed=false;
-  try {
-    const created=await client.send(new CreateMultipartUploadCommand({
-      Bucket:process.env.R2_BUCKET,Key:objectKey,ContentType:"video/mp4"
-    }));
-    uploadId=created.UploadId;
-    const uploadUrl=await getSignedUrl(client,new UploadPartCommand({
-      Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId,PartNumber:1
-    }),{expiresIn:300});
-    const origin="https://ahm-movies-git-feature-movie-recap-5b9415-aidarushamza9727-3554.vercel.app";
-    const preflight=await fetch(uploadUrl,{method:"OPTIONS",headers:{
-      Origin:origin,"Access-Control-Request-Method":"PUT","Access-Control-Request-Headers":"content-type"
-    },signal:AbortSignal.timeout(15000)});
-    const put=await fetch(uploadUrl,{method:"PUT",headers:{Origin:origin,"Content-Type":"video/mp4"},
-      body:Buffer.from("AHM multipart upload check"),signal:AbortSignal.timeout(20000)});
-    const etag=put.headers.get("etag");
-    if(!put.ok||!etag)throw new Error("R2 multipart part upload or ETag failed: "+put.status);
-    await client.send(new CompleteMultipartUploadCommand({
-      Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId,
-      MultipartUpload:{Parts:[{PartNumber:1,ETag:etag}]}
-    }));
-    completed=true;
-    const cors={
-      status:preflight.status,
-      allowOrigin:preflight.headers.get("access-control-allow-origin"),
-      allowMethods:preflight.headers.get("access-control-allow-methods"),
-      allowHeaders:preflight.headers.get("access-control-allow-headers"),
-      exposeHeaders:put.headers.get("access-control-expose-headers"),
-      etagPresent:Boolean(etag)
-    };
-    await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:objectKey}));
-    res.json({ok:true,cors,partPutStatus:put.status,completed:true,cleaned:true});
-  } catch(error) {
-    if(uploadId&&!completed)await client.send(new AbortMultipartUploadCommand({Bucket:process.env.R2_BUCKET,Key:objectKey,UploadId:uploadId})).catch(()=>{});
-    if(completed)await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:objectKey})).catch(()=>{});
-    console.error("multipart diagnostic failed",error.name,error.message);
-    res.status(502).json({ok:false,error:"Multipart R2 diagnostic failed."});
-  }
-});
-
 app.post("/api/recap/browser-test", async (_req,res) => {
   try {
     const storage=storageConfig();
