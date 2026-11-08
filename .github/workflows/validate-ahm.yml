@@ -1,0 +1,30 @@
+name: Validate AHM Movies
+on:
+  push:
+    branches:
+      - feature/movie-recap-rebuild
+    paths:
+      - "public/**"
+      - "worker/**"
+      - "server.js"
+      - ".github/workflows/validate-ahm.yml"
+  pull_request:
+    branches:
+      - feature/movie-recap-rebuild
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check JavaScript
+        run: node --check public/app.js && node --check server.js
+      - name: Check Python worker
+        run: python -m py_compile worker/movie_api.py
+      - name: Check patch whitespace
+        run: git diff --check
