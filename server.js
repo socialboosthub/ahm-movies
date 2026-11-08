@@ -49,15 +49,30 @@ async function workerRequest(route, options={}) {
   return data;
 }
 
-app.get("/api/recap/health", (_req,res) => {
+app.get("/api/recap/health", async (_req,res) => {
   const storage=storageConfig();
+  let worker="not_configured";
+  if (workerReady()) {
+    try {
+      const probe=await workerRequest("/health");
+      worker=probe && probe.ok===true ? "connected" : "unhealthy";
+    } catch (error) {
+      worker="unreachable";
+      console.warn("worker health check failed",error.message);
+    }
+  }
+  const missing=[
+    ...storage.missing,
+    ...(!workerReady()?["RECAP_WORKER_URL","RECAP_WORKER_TOKEN"]:[]),
+    ...(workerReady() && worker!=="connected"?["worker_unreachable"]:[])
+  ];
   res.json({
-    ok:true,app:"AHM Movies",version:"2.0.0",
+    ok:storage.ready && worker==="connected",app:"AHM Movies",version:"2.0.1",
     storage:storage.ready?"ready":"not_configured",
-    worker:workerReady()?"connected":"not_configured",
+    worker,
     uploadMode:"direct-to-object-storage",
     limits:{maxUploadBytes:MAX_UPLOAD_BYTES},
-    missing:[...storage.missing, ...(!workerReady()?["RECAP_WORKER_URL","RECAP_WORKER_TOKEN"]:[])]
+    missing
   });
 });
 
