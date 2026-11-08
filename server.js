@@ -87,8 +87,7 @@ app.post("/api/recap/uploads", async (req,res) => {
     if (!storage.ready) return res.status(503).json({ok:false,error:"Movie storage is not configured yet.",missing:storage.missing});
     const key=`incoming/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${clean(filename)}`;
     const uploadUrl=await getSignedUrl(s3(),new PutObjectCommand({
-      Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType,
-      Metadata:{originalname:clean(filename)}
+      Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType
     }),{expiresIn:3600});
     res.json({ok:true,uploadUrl,objectKey:key,expiresIn:3600});
   } catch(error) {
