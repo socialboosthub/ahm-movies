@@ -37,6 +37,52 @@ def transcribe(path,words=False):
   if words:row["words"]=[{"word":w.word.strip(),"start":float(w.start),"end":float(w.end)} for w in (s.words or []) if w.word.strip()]
   out.append(row)
  return out,info.language
+async def transcribe_movie(path,duration,job_id):
+ key=os.getenv("GROQ_API_KEY","")
+ if not key or os.getenv("TRANSCRIBE_PROVIDER","groq").lower()=="local":
+  return transcribe(path)
+ chunk_seconds=600
+ starts=list(range(0,int(duration),chunk_seconds))
+ if not starts:starts=[0]
+ chunk_dir=path.parent/"groq-audio-chunks";chunk_dir.mkdir(parents=True,exist_ok=True)
+ rows=[];detected="unknown"
+ url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/audio/transcriptions"
+ try:
+  async with httpx.AsyncClient(timeout=300) as client:
+   for index,start in enumerate(starts):
+    chunk=chunk_dir/f"audio_{index:03}.mp3"
+    length=min(chunk_seconds,duration-start)
+    run(["ffmpeg","-y","-ss",str(start),"-t",str(length),"-i",str(path),"-vn","-ac","1","-ar","16000","-b:a","48k",str(chunk)])
+    data=[("model","whisper-large-v3-turbo"),("response_format","verbose_json"),("timestamp_granularities[]","segment"),("temperature","0")]
+    for attempt in range(6):
+     with chunk.open("rb") as audio_file:
+      response=await client.post(url,headers={"Authorization":f"Bearer {key}"},data=data,files={"file":(chunk.name,audio_file,"audio/mpeg")})
+     if response.status_code in (429,500,502,503,504) and attempt<5:
+      retry=response.headers.get("retry-after")
+      try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
+      except ValueError:delay=min(30,2**attempt*2)
+      await asyncio.sleep(delay)
+      continue
+     response.raise_for_status()
+     result=response.json()
+     detected=result.get("language",detected)
+     for segment in result.get("segments",[]):
+      text_value=str(segment.get("text","")).strip()
+      if not text_value:continue
+      a=max(0.0,start+float(segment.get("start",0)))
+      b=min(duration,start+float(segment.get("end",0)))
+      if b>a:rows.append({"start":a,"end":b,"text":text_value})
+     break
+    else:raise RuntimeError("Groq transcription retry limit reached.")
+    update(job_id,stage=f"Transcribing full movie · audio section {index+1}/{len(starts)}",progress=12+int((index+1)/len(starts)*20))
+  if len(rows)>=5:
+   rows.sort(key=lambda item:item["start"])
+   return rows,detected
+  raise RuntimeError("Groq returned too little movie dialogue.")
+ except Exception as error:
+  update(job_id,stage="Remote transcription unavailable · using local Whisper",progress=12)
+  print("Groq movie transcription fallback:",str(error)[:300])
+  return transcribe(path)
 async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events."):
  key=os.getenv("GROQ_API_KEY")
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
@@ -140,7 +186,7 @@ async def process(job_id,payload):
   audio=tmp/"full_audio.wav";update(job_id,stage="Extracting complete movie audio",progress=7)
   run(["ffmpeg","-y","-i",str(movie),"-vn","-ac","1","-ar","16000","-c:a","pcm_s16le",str(audio)])
   update(job_id,stage="Transcribing the entire movie",progress=12)
-  transcript,detected=transcribe(audio)
+  transcript,detected=await transcribe_movie(audio,duration,job_id)
   if len(transcript)<5:raise RuntimeError("Not enough dialogue was detected to analyse the movie.")
   update(job_id,stage="Analysing characters, twists and the ending",progress=36,transcript_segments=len(transcript),detected_language=detected)
   recap=await plan_recap(transcript,duration,settings)
