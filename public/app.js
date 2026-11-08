@@ -53,7 +53,7 @@ function selectFile(file){
  if(file.size>4.5*1024**3){status("This file is over the current 4.5 GB upload limit.","error");return;}
  state.file=file;$("fileTitle").textContent=file.name;$("fileMeta").textContent=bytes(file.size)+" · "+file.type;
  if(state.previewUrl)URL.revokeObjectURL(state.previewUrl);
- state.previewUrl=URL.createObjectURL(file);const preview=$("moviePreview");preview.src=state.previewUrl;preview.preload="metadata";preview.hidden=false;preview.load();preview.onerror=()=>{status("Movie selected, but this browser cannot preview its video codec. Upload can still continue.","");};preview.onloadedmetadata=()=>{if(Number.isFinite(preview.duration))$("fileMeta").textContent=bytes(file.size)+" · "+Math.round(preview.duration/60)+" min · "+file.type;};
+ state.previewUrl=URL.createObjectURL(file);const preview=$("moviePreview");preview.pause();preview.removeAttribute("src");preview.preload="metadata";preview.controls=true;preview.hidden=false;preview.onloadedmetadata=()=>{if(Number.isFinite(preview.duration))$("fileMeta").textContent=bytes(file.size)+" · "+Math.round(preview.duration/60)+" min · "+file.type;};preview.onloadeddata=()=>{status("Video preview ready. Tap play to check your movie; upload is available even if this phone cannot decode its preview.","success");};preview.onerror=()=>{status("This phone/browser cannot preview this video codec. The original file can still be uploaded and processed.","warning");};preview.src=state.previewUrl;preview.load();
  status("Movie selected. It will upload directly to storage when you start.","success");updateStart();
 }
 $("movieFile").addEventListener("change",e=>selectFile(e.target.files[0]));
