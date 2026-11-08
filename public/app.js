@@ -84,22 +84,25 @@ async function multipartUpload(file){
  try{
   for(let partNumber=1;partNumber<=count;partNumber++){
    const begin=(partNumber-1)*partSize,end=Math.min(file.size,begin+partSize),blob=file.slice(begin,end);
-   const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber})});
    let result=null,lastError=null;
-   for(let attempt=1;attempt<=4&&!result;attempt++){
+   for(let attempt=1;attempt<=5&&!result;attempt++){
     try{
+     // Request a fresh signed URL for every attempt; never reuse a URL after
+     // a browser/network interruption.
+     const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber})});
      result=await xhrPut(signed.uploadUrl,blob,file.type,e=>{
       if(e.lengthComputable){
        const pct=Math.round((uploaded+e.loaded)/file.size*100);
        $("uploadBar").style.width=pct+"%";
        $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
-     });
+     },8*60*1000);
     }catch(error){
      lastError=error;
-     if(attempt===1&&navigator.onLine){
-      $("uploadLabel").textContent="Part "+partNumber+" interrupted · retrying…";
-      await new Promise(resolve=>setTimeout(resolve,1200));
+     if(attempt<5){
+      const delay=Math.min(10000,1000*(2**(attempt-1)));
+      $("uploadLabel").textContent="Part "+partNumber+" interrupted · renewing connection ("+attempt+"/4)…";
+      await new Promise(resolve=>setTimeout(resolve,delay));
      }
     }
    }
