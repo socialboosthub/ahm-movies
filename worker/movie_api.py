@@ -200,7 +200,13 @@ async def process(job_id,payload):
    audio_file=tmp/f"voice_{i:03}.mp3";srt=tmp/f"subs_{i:03}.srt";clip=tmp/f"clip_{i:03}.mp4"
    await tts(narration,voice,float(settings.get("pace",1)),audio_file)
    subtitles(audio_file,narration,srt)
-   render(movie,audio_file,srt,float(scene["source_start"]),float(scene["source_end"]),clip,has_source_audio)
+   voice_seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio_file)]).strip())
+   clip_start=float(scene["source_start"]);clip_end=float(scene["source_end"])
+   needed=voice_seconds+0.25
+   if clip_end-clip_start<needed:
+    clip_end=min(duration,clip_start+needed)
+    if clip_end-clip_start<needed:clip_start=max(0,clip_end-needed)
+   render(movie,audio_file,srt,clip_start,clip_end,clip,has_source_audio)
    part=int(scene["part"]);clips[part].append(clip)
    durations[part]+=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(clip)]).strip())
    update(job_id,stage=f"Editing original footage · scene {i+1}/{total}",progress=45+int((i+1)/total*48))
