@@ -122,7 +122,7 @@ async def plan_recap(rows,duration,settings):
   evidence.append(data)
  ending_rows=rows[-max(12,min(40,len(rows))):]
  ending_text="\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
- prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; at least the final segment must select a source window from the final 5 percent of the movie. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
+ prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; the final segment must select footage from the actual final dialogue or ending sequence, not unrelated end credits. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
  result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending.")
  segments=result.get("segments",[])
  valid=[]
@@ -136,11 +136,13 @@ async def plan_recap(rows,duration,settings):
  counts={p:sum(1 for x in valid if x["part"]==p) for p in (1,2,3)}
  if any(counts[p]<3 for p in (1,2,3)):
   raise RuntimeError("The recap plan did not create three complete story parts. Retry the job.")
- # Keep the ending tied to the final portion of the source film.
+ # Anchor the final shot to the last spoken story evidence, avoiding unrelated end credits.
  ending=max((x for x in valid if x["part"]==3),key=lambda x:x["source_start"])
- if ending["source_start"] < duration*0.95:
-  ending["source_start"]=max(0,duration-25)
-  ending["source_end"]=duration
+ ending_anchor=float(rows[-1]["start"]) if rows else duration
+ if ending["source_start"] < max(0,duration-180):
+  ending_start=max(0,min(duration-5,ending_anchor-12))
+  ending["source_start"]=ending_start
+  ending["source_end"]=min(duration,ending_start+25)
  return {"title":result.get("title","Movie Recap"),"segments":valid}
 
 def stamp(t):
