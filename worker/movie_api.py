@@ -50,15 +50,15 @@ async def plan_recap(rows,duration,settings):
  chunks=[];buf=[];size=0
  for row in rows:
   line=f"[{row['start']:.1f}-{row['end']:.1f}] {row['text']}"
-  if size+len(line)>9500 and buf:chunks.append("\\n".join(buf));buf=[];size=0
+  if size+len(line)>9500 and buf:chunks.append("\n".join(buf));buf=[];size=0
   buf.append(line);size+=len(line)
- if buf:chunks.append("\\n".join(buf))
+ if buf:chunks.append("\n".join(buf))
  evidence=[]
  for i,chunk in enumerate(chunks):
-  data=await ask(f"Summarize this chronological part {i+1}/{len(chunks)} of a {duration/60:.1f}-minute movie. Keep all character names, causes, motives, reveals and ending clues. Do not invent. Return JSON {{\\"summary\\":\\"...\\",\\"events\\":[{{\\"time\\":0,\\"event\\":\\"...\\",\\"characters\\":[...]}}]}}.\\n{chunk}")
+  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Return a JSON object with a summary string and an events array; each event has a timestamp, event description and character names.\n{chunk}")
   evidence.append(data)
  ending_rows=rows[-max(12,min(40,len(rows))):]
- ending_text="\\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
+ ending_text="\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
  prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; at least the final segment must select a source window from the final 5 percent of the movie. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
  result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending.")
  segments=result.get("segments",[])
@@ -98,7 +98,7 @@ def subtitles(audio,text,path):
  path.write_text("\n".join(blocks),encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\\\:")+":force_style='FontName=DejaVu Sans,FontSize=46,Bold=1,Italic=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=4,Shadow=2,Alignment=2,MarginV=170,WrapStyle=2,Spacing=1'"
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=46,Bold=1,Italic=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=4,Shadow=2,Alignment=2,MarginV=170,WrapStyle=2,Spacing=1'"
  cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
  if has_source_audio:
   mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
