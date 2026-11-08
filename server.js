@@ -159,7 +159,7 @@ app.post("/api/recap/multipart/create", async (req,res) => {
       Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType
     }));
     if (!created.UploadId) throw new Error("R2 did not return a multipart upload ID.");
-    res.json({ok:true,objectKey:key,uploadId:created.UploadId,partSize:8*1024*1024});
+    res.json({ok:true,objectKey:key,uploadId:created.UploadId,partSize:5*1024*1024});
   } catch(error) {
     console.error("multipart upload creation failed",error.name,error.message);
     res.status(500).json({ok:false,error:"Could not start the secure multipart upload."});
