@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const app = express();
@@ -74,6 +74,23 @@ app.get("/api/recap/health", async (_req,res) => {
     limits:{maxUploadBytes:MAX_UPLOAD_BYTES},
     missing
   });
+});
+
+app.get("/api/recap/diagnostic", async (_req,res) => {
+  const storage=storageConfig();
+  if (!storage.ready) return res.status(503).json({ok:false,stage:"configuration",missing:storage.missing});
+  const key=`diagnostics/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.txt`;
+  try {
+    const client=s3();
+    await client.send(new PutObjectCommand({
+      Bucket:process.env.R2_BUCKET,Key:key,Body:Buffer.from("AHM Movies R2 diagnostic"),ContentType:"text/plain"
+    }));
+    await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:key}));
+    return res.json({ok:true,stage:"r2_write_delete",message:"R2 credentials and bucket write access are working."});
+  } catch(error) {
+    console.error("R2 diagnostic failed",error.name,error.message);
+    return res.status(502).json({ok:false,stage:"r2_write_delete",error:error.name||"StorageError",message:"R2 write test failed. Check bucket credentials and permissions."});
+  }
 });
 
 app.post("/api/recap/uploads", async (req,res) => {
