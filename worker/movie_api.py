@@ -57,7 +57,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
      continue
     r.raise_for_status()
     raw=r.json()["choices"][0]["message"]["content"].strip()
-    if raw.startswith("```"):raw="\\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
+     if raw.startswith("```"):raw="\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
     return json.loads(raw)
    except httpx.RequestError:
     if attempt>=5:raise
