@@ -9,6 +9,7 @@ function setConnection(label,ok){$("connection").textContent=label;$("connection
 async function api(url,options={}){const r=await fetch(url,options);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Request failed ("+r.status+")");return d;}
 async function browserUploadCheck(){
  const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+ const report=(result,message="")=>api("/api/recap/browser-test/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({result,message,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
  try{
   await new Promise((resolve,reject)=>{
    const xhr=new XMLHttpRequest();
@@ -22,6 +23,10 @@ async function browserUploadCheck(){
    xhr.onabort=()=>reject(new Error("The browser-to-R2 test was cancelled."));
    xhr.send(new Blob([new Uint8Array([65,72,77,45,82,50])],{type:"video/mp4"}));
   });
+  await report("passed");
+ } catch(e) {
+  await report("failed",e.message);
+  throw e;
  } finally {
   await api("/api/recap/browser-test/cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey})}).catch(()=>{});
  }
