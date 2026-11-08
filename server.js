@@ -132,6 +132,33 @@ app.get("/api/recap/diagnostic", async (_req,res) => {
   }
 });
 
+app.post("/api/recap/browser-test", async (_req,res) => {
+  try {
+    const storage=storageConfig();
+    if (!storage.ready) return res.status(503).json({ok:false,error:"Storage is not configured."});
+    const objectKey=`diagnostics/browser/${Date.now()}-${crypto.randomUUID()}.mp4`;
+    const uploadUrl=await getSignedUrl(s3(),new PutObjectCommand({
+      Bucket:process.env.R2_BUCKET,Key:objectKey,ContentType:"video/mp4"
+    }),{expiresIn:600});
+    res.json({ok:true,uploadUrl,objectKey});
+  } catch(error) {
+    console.error("browser upload test signing failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Could not prepare browser upload test."});
+  }
+});
+app.post("/api/recap/browser-test/cleanup", async (req,res) => {
+  const objectKey=String(req.body?.objectKey||"");
+  if (!/^diagnostics\\/browser\\/[a-zA-Z0-9._-]+\\.mp4$/.test(objectKey))
+    return res.status(400).json({ok:false,error:"Invalid diagnostic object key."});
+  try {
+    await s3().send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:objectKey}));
+    res.json({ok:true});
+  } catch(error) {
+    console.warn("browser upload test cleanup failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Diagnostic cleanup failed."});
+  }
+});
+
 app.post("/api/recap/uploads", async (req,res) => {
   try {
     const {filename,contentType,size}=req.body||{};
