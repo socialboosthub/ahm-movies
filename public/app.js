@@ -11,7 +11,7 @@ async function browserUploadCheck(){
  const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
  const report=(result,message="")=>api("/api/recap/browser-test/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({result,message,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
  try{
-  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array([65,72,77,45,82,50])],{type:"video/mp4"}),"video/mp4",null,20000);
+  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(8*1024*1024)],{type:"video/mp4"}),"video/mp4",null,90000);
   const etag=xhr.getResponseHeader("ETag");
   if(!etag)throw new Error("R2 did not expose the ETag needed to finish multipart uploads.");
   await api("/api/recap/browser-test/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId,etag})});
@@ -53,7 +53,7 @@ function selectFile(file){
  if(file.size>4.5*1024**3){status("This file is over the current 4.5 GB upload limit.","error");return;}
  state.file=file;$("fileTitle").textContent=file.name;$("fileMeta").textContent=bytes(file.size)+" · "+file.type;
  if(state.previewUrl)URL.revokeObjectURL(state.previewUrl);
- state.previewUrl=URL.createObjectURL(file);$("moviePreview").src=state.previewUrl;$("moviePreview").hidden=false;
+ state.previewUrl=URL.createObjectURL(file);const preview=$("moviePreview");preview.src=state.previewUrl;preview.preload="metadata";preview.hidden=false;preview.load();preview.onerror=()=>{status("Movie selected, but this browser cannot preview its video codec. Upload can still continue.","");};preview.onloadedmetadata=()=>{if(Number.isFinite(preview.duration))$("fileMeta").textContent=bytes(file.size)+" · "+Math.round(preview.duration/60)+" min · "+file.type;};
  status("Movie selected. It will upload directly to storage when you start.","success");updateStart();
 }
 $("movieFile").addEventListener("change",e=>selectFile(e.target.files[0]));
@@ -86,7 +86,7 @@ async function multipartUpload(file){
    const begin=(partNumber-1)*partSize,end=Math.min(file.size,begin+partSize),blob=file.slice(begin,end);
    const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber})});
    let result=null,lastError=null;
-   for(let attempt=1;attempt<=2&&!result;attempt++){
+   for(let attempt=1;attempt<=4&&!result;attempt++){
     try{
      result=await xhrPut(signed.uploadUrl,blob,file.type,e=>{
       if(e.lengthComputable){
