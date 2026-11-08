@@ -109,12 +109,22 @@ app.get("/api/recap/diagnostic", async (_req,res) => {
     const corsOk=cors.allowOrigin===origin &&
       (cors.allowMethods||"").toUpperCase().split(/[,\\s]+/).includes("PUT") &&
       (cors.allowHeaders||"").toLowerCase().split(/[,\\s]+/).includes("content-type");
+    const testBody=Buffer.from("AHM Movies signed browser upload diagnostic");
+    const put=await fetch(signedUrl,{
+      method:"PUT",
+      headers:{Origin:origin,"Content-Type":contentType},
+      body:testBody,
+      signal:AbortSignal.timeout(20000)
+    });
+    const putText=await put.text();
+    if (put.ok) await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:key}));
     return res.json({
       ok:true,
       storage:"write_delete_passed",
       corsPreflight:cors,
       corsOk,
-      message:corsOk?"R2 write access and browser CORS preflight both passed.":"R2 credentials work, but R2 CORS preflight did not authorize the AHM browser upload."
+      signedPut:{status:put.status,ok:put.ok,response:putText.slice(0,500)},
+      message:put.ok?"R2 credentials, CORS preflight, and signed PUT all passed.":"R2 CORS preflight passed, but the signed PUT failed."
     });
   } catch(error) {
     console.error("R2 diagnostic failed",error.name,error.message);
