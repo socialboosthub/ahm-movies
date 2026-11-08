@@ -7,6 +7,25 @@ const bytes=n=>n<1024**3?(n/1024**2).toFixed(1)+" MB":(n/1024**3).toFixed(2)+" G
 function status(message,type=""){$("jobStatus").textContent=message;$("jobStatus").className="job-status "+type;}
 function setConnection(label,ok){$("connection").textContent=label;$("connection").className="status-pill "+(ok?"online":"offline");}
 async function api(url,options={}){const r=await fetch(url,options);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Request failed ("+r.status+")");return d;}
+async function browserUploadCheck(){
+ const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+ try{
+  await new Promise((resolve,reject)=>{
+   const xhr=new XMLHttpRequest();
+   xhr.open("PUT",signed.uploadUrl);
+   xhr.withCredentials=false;
+   xhr.timeout=20000;
+   xhr.setRequestHeader("Content-Type","video/mp4");
+   xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error("R2 browser test returned HTTP "+xhr.status+"."));
+   xhr.onerror=()=>reject(new Error("This browser could not complete a tiny upload to R2 (network/CORS, status "+xhr.status+")."));
+   xhr.ontimeout=()=>reject(new Error("The browser-to-R2 test timed out."));
+   xhr.onabort=()=>reject(new Error("The browser-to-R2 test was cancelled."));
+   xhr.send(new Blob([new Uint8Array([65,72,77,45,82,50])],{type:"video/mp4"}));
+  });
+ } finally {
+  await api("/api/recap/browser-test/cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey})}).catch(()=>{});
+ }
+}
 async function checkHealth(){
  try{
   const h=await api("/api/recap/health");
@@ -14,7 +33,20 @@ async function checkHealth(){
   setConnection(storage&&worker?"Services connected":"Setup required",storage&&worker);
   $("serviceNote").textContent=storage&&worker?"Storage and the movie-processing worker are connected. You can start a real recap job.":"Backend routes are installed, but production services are not configured yet. Storage: "+h.storage+". Processing worker: "+h.worker+".";
   if(!storage||!worker){$("startBtn").disabled=true;status("Backend is online. Complete the storage and worker setup before processing a full movie.","warning");}
-  else updateStart();
+  else {
+   $("startBtn").disabled=true;
+   $("serviceNote").textContent="Checking the upload connection from this browser…";
+   try {
+    await browserUploadCheck();
+    $("serviceNote").textContent="Storage, processing worker and this browser's upload connection are verified.";
+    updateStart();
+   } catch(e) {
+    setConnection("Upload check failed",false);
+    $("serviceNote").textContent=e.message;
+    $("startBtn").disabled=true;
+    status("Browser upload connection could not be verified.","error");
+   }
+  }
  }catch(e){setConnection("API unavailable",false);$("serviceNote").textContent=e.message;$("startBtn").disabled=true;}
 }
 function updateStart(){$("startBtn").disabled=!state.file||state.uploading||state.polling;}
@@ -35,15 +67,37 @@ $("pace").addEventListener("input",e=>{$("paceValue").textContent=Number(e.targe
 async function upload(){
  const file=state.file;
  const signed=await api("/api/recap/uploads",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
- $("uploadProgress").hidden=false;$("uploadBar").style.width="0%";$("uploadLabel").textContent="Uploading movie securely…";
- await new Promise((resolve,reject)=>{
-  const xhr=new XMLHttpRequest();xhr.open("PUT",signed.uploadUrl);xhr.setRequestHeader("Content-Type",file.type);
-  xhr.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);$("uploadBar").style.width=p+"%";$("uploadLabel").textContent="Uploading movie… "+p+"%";}};
-  xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error("Storage upload failed ("+xhr.status+"). Please retry."));
-  xhr.onerror=()=>reject(new Error("Network/CORS error during movie upload. Check that this AHM Movies site is allowed in the R2 bucket CORS settings for PUT and Content-Type, then retry."));
-  xhr.onabort=()=>reject(new Error("Movie upload was cancelled."));xhr.send(file);
- });
- state.objectKey=signed.objectKey;$("uploadLabel").textContent="Upload complete · starting movie analysis";
+ $("uploadProgress").hidden=false;
+ let completed=false,lastError=null;
+ for(let attempt=1;attempt<=2&&!completed;attempt++){
+  $("uploadBar").style.width="0%";
+  $("uploadLabel").textContent=attempt===1?"Uploading movie securely…":"Connection interrupted · retrying upload (2/2)…";
+  try{
+   await new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open("PUT",signed.uploadUrl);
+    xhr.withCredentials=false;
+    xhr.timeout=45*60*1000;
+    xhr.setRequestHeader("Content-Type",file.type);
+    xhr.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);$("uploadBar").style.width=p+"%";$("uploadLabel").textContent="Uploading movie… "+p+"%";}};
+    xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error("R2 rejected the upload (HTTP "+xhr.status+"). "+String(xhr.responseText||"").slice(0,240)));
+    xhr.onerror=()=>reject(new Error("Browser-to-R2 connection failed (status "+xhr.status+"). The small browser upload check passed, so this may be a network interruption during the large movie transfer."));
+    xhr.ontimeout=()=>reject(new Error("Movie upload timed out. The signed upload link is valid for one hour; retry when the connection is stable."));
+    xhr.onabort=()=>reject(new Error("Movie upload was cancelled."));
+    xhr.send(file);
+   });
+   completed=true;
+  }catch(e){
+   lastError=e;
+   if(attempt===1&&navigator.onLine){
+    $("uploadLabel").textContent="Upload interrupted · retrying once…";
+    await new Promise(resolve=>setTimeout(resolve,1500));
+   }
+  }
+ }
+ if(!completed)throw lastError||new Error("Movie upload failed. Please retry.");
+ state.objectKey=signed.objectKey;
+ $("uploadLabel").textContent="Upload complete · starting movie analysis";
 }
 async function startJob(){
  if(!state.file||state.uploading||state.polling)return;
