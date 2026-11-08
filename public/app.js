@@ -40,7 +40,7 @@ async function upload(){
   const xhr=new XMLHttpRequest();xhr.open("PUT",signed.uploadUrl);xhr.setRequestHeader("Content-Type",file.type);
   xhr.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);$("uploadBar").style.width=p+"%";$("uploadLabel").textContent="Uploading movie… "+p+"%";}};
   xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error("Storage upload failed ("+xhr.status+"). Please retry."));
-  xhr.onerror=()=>reject(new Error("Network error during movie upload. Check your connection and retry."));
+  xhr.onerror=()=>reject(new Error("Network/CORS error during movie upload. Check that this AHM Movies site is allowed in the R2 bucket CORS settings for PUT and Content-Type, then retry."));
   xhr.onabort=()=>reject(new Error("Movie upload was cancelled."));xhr.send(file);
  });
  state.objectKey=signed.objectKey;$("uploadLabel").textContent="Upload complete · starting movie analysis";
