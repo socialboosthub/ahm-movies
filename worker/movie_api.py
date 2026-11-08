@@ -41,11 +41,28 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
  key=os.getenv("GROQ_API_KEY")
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
  url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions"
- async with httpx.AsyncClient(timeout=180) as client:
-  r=await client.post(url,headers={"Authorization":f"Bearer {key}"},json={"model":os.getenv("LLM_MODEL","llama-3.3-70b-versatile"),"temperature":0.2,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":prompt}]})
-  r.raise_for_status()
-  raw=r.json()["choices"][0]["message"]["content"]
-  return json.loads(re.sub(r"^\s*```(?:json)?|\`\`\`\s*$","",raw.strip(),flags=re.I))
+ model=os.getenv("LLM_MODEL","openai/gpt-oss-20b")
+ payload={"model":model,"temperature":0.2,"max_completion_tokens":4096,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":prompt}]}
+ if model.startswith("openai/gpt-oss/") or model.startswith("openai/gpt-oss-"):
+  payload["reasoning_effort"]=os.getenv("LLM_REASONING_EFFORT","medium")
+ async with httpx.AsyncClient(timeout=240) as client:
+  for attempt in range(6):
+   try:
+    r=await client.post(url,headers={"Authorization":f"Bearer {key}"},json=payload)
+    if r.status_code in (429,500,502,503,504) and attempt<5:
+     retry=r.headers.get("retry-after")
+     try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
+     except ValueError:delay=min(30,2**attempt*2)
+     await asyncio.sleep(delay)
+     continue
+    r.raise_for_status()
+    raw=r.json()["choices"][0]["message"]["content"].strip()
+    if raw.startswith("```"):raw="\\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
+    return json.loads(raw)
+   except httpx.RequestError:
+    if attempt>=5:raise
+    await asyncio.sleep(min(30,2**attempt*2))
+  raise RuntimeError("The free AI service is temporarily rate-limited or unavailable. Retry the recap job.")
 async def plan_recap(rows,duration,settings):
  chunks=[];buf=[];size=0
  for row in rows:
