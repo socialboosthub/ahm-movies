@@ -69,28 +69,81 @@ $("dropzone").addEventListener("dragover",e=>{e.preventDefault();$("dropzone").c
 $("dropzone").addEventListener("dragleave",()=>$("dropzone").classList.remove("drag"));
 $("dropzone").addEventListener("drop",e=>{e.preventDefault();$("dropzone").classList.remove("drag");selectFile(e.dataTransfer.files[0]);});
 $("pace").addEventListener("input",e=>{$("paceValue").textContent=Number(e.target.value)===1?"Normal":Number(e.target.value)<1?"Slower":"Faster";});
+function xhrPut(url,blob,contentType,onProgress,timeout=15*60*1000){
+ return new Promise((resolve,reject)=>{
+  const xhr=new XMLHttpRequest();
+  xhr.open("PUT",url);
+  xhr.withCredentials=false;
+  xhr.timeout=timeout;
+  if(contentType)xhr.setRequestHeader("Content-Type",contentType);
+  xhr.upload.onprogress=onProgress||null;
+  xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve(xhr):reject(new Error("R2 upload returned HTTP "+xhr.status+". "+String(xhr.responseText||"").slice(0,220)));
+  xhr.onerror=()=>reject(new Error("Browser-to-R2 connection interrupted (status "+xhr.status+")."));
+  xhr.ontimeout=()=>reject(new Error("R2 upload timed out."));
+  xhr.onabort=()=>reject(new Error("R2 upload was cancelled."));
+  xhr.send(blob);
+ });
+}
+async function multipartUpload(file){
+ const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
+ const partSize=Number(created.partSize)||16*1024*1024;
+ const count=Math.ceil(file.size/partSize),parts=[];
+ let uploaded=0,complete=false;
+ try{
+  for(let partNumber=1;partNumber<=count;partNumber++){
+   const begin=(partNumber-1)*partSize,end=Math.min(file.size,begin+partSize),blob=file.slice(begin,end);
+   const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber})});
+   let result=null,lastError=null;
+   for(let attempt=1;attempt<=2&&!result;attempt++){
+    try{
+     result=await xhrPut(signed.uploadUrl,blob,file.type,e=>{
+      if(e.lengthComputable){
+       const pct=Math.round((uploaded+e.loaded)/file.size*100);
+       $("uploadBar").style.width=pct+"%";
+       $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
+      }
+     });
+    }catch(error){
+     lastError=error;
+     if(attempt===1&&navigator.onLine){
+      $("uploadLabel").textContent="Part "+partNumber+" interrupted · retrying…";
+      await new Promise(resolve=>setTimeout(resolve,1200));
+     }
+    }
+   }
+   if(!result)throw lastError||new Error("Could not upload part "+partNumber+".");
+   const etag=result.getResponseHeader("ETag");
+   if(!etag)throw new Error("R2 did not expose the ETag for upload part "+partNumber+".");
+   parts.push({PartNumber:partNumber,ETag:etag});
+   uploaded+=blob.size;
+   $("uploadBar").style.width=Math.round(uploaded/file.size*100)+"%";
+   $("uploadLabel").textContent="Uploaded part "+partNumber+"/"+count;
+  }
+  await api("/api/recap/multipart/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,parts})});
+  complete=true;
+  state.objectKey=created.objectKey;
+ } finally {
+  if(!complete)await api("/api/recap/multipart/abort",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId})}).catch(()=>{});
+ }
+}
 async function upload(){
  const file=state.file;
- const signed=await api("/api/recap/uploads",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
  $("uploadProgress").hidden=false;
+ if(file.size>=100*1024*1024){
+  $("uploadLabel").textContent="Preparing resumable secure upload…";
+  await multipartUpload(file);
+  $("uploadLabel").textContent="Upload complete · starting movie analysis";
+  return;
+ }
+ const signed=await api("/api/recap/uploads",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
  let completed=false,lastError=null;
  for(let attempt=1;attempt<=2&&!completed;attempt++){
   $("uploadBar").style.width="0%";
   $("uploadLabel").textContent=attempt===1?"Uploading movie securely…":"Connection interrupted · retrying upload (2/2)…";
   try{
-   await new Promise((resolve,reject)=>{
-    const xhr=new XMLHttpRequest();
-    xhr.open("PUT",signed.uploadUrl);
-    xhr.withCredentials=false;
-    xhr.timeout=45*60*1000;
-    xhr.setRequestHeader("Content-Type",file.type);
-    xhr.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);$("uploadBar").style.width=p+"%";$("uploadLabel").textContent="Uploading movie… "+p+"%";}};
-    xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error("R2 rejected the upload (HTTP "+xhr.status+"). "+String(xhr.responseText||"").slice(0,240)));
-    xhr.onerror=()=>reject(new Error("Browser-to-R2 connection failed (status "+xhr.status+"). The small browser upload check passed, so this may be a network interruption during the large movie transfer."));
-    xhr.ontimeout=()=>reject(new Error("Movie upload timed out. The signed upload link is valid for one hour; retry when the connection is stable."));
-    xhr.onabort=()=>reject(new Error("Movie upload was cancelled."));
-    xhr.send(file);
-   });
+   await xhrPut(signed.uploadUrl,file,file.type,e=>{
+    if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);$("uploadBar").style.width=p+"%";$("uploadLabel").textContent="Uploading movie… "+p+"%";}
+   },45*60*1000);
    completed=true;
   }catch(e){
    lastError=e;
