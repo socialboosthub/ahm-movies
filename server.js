@@ -79,17 +79,46 @@ app.get("/api/recap/health", async (_req,res) => {
 app.get("/api/recap/diagnostic", async (_req,res) => {
   const storage=storageConfig();
   if (!storage.ready) return res.status(503).json({ok:false,stage:"configuration",missing:storage.missing});
-  const key=`diagnostics/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.txt`;
   try {
     const client=s3();
+    const key=`diagnostics/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.txt`;
     await client.send(new PutObjectCommand({
       Bucket:process.env.R2_BUCKET,Key:key,Body:Buffer.from("AHM Movies R2 diagnostic"),ContentType:"text/plain"
     }));
     await client.send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:key}));
-    return res.json({ok:true,stage:"r2_write_delete",message:"R2 credentials and bucket write access are working."});
+    const contentType="video/mp4";
+    const signedUrl=await getSignedUrl(client,new PutObjectCommand({
+      Bucket:process.env.R2_BUCKET,Key:key,ContentType:contentType
+    }),{expiresIn:300});
+    const origin="https://ahm-movies-git-feature-movie-recap-5b9415-aidarushamza9727-3554.vercel.app";
+    const preflight=await fetch(signedUrl,{
+      method:"OPTIONS",
+      headers:{
+        Origin:origin,
+        "Access-Control-Request-Method":"PUT",
+        "Access-Control-Request-Headers":"content-type"
+      },
+      signal:AbortSignal.timeout(15000)
+    });
+    const cors={
+      status:preflight.status,
+      allowOrigin:preflight.headers.get("access-control-allow-origin"),
+      allowMethods:preflight.headers.get("access-control-allow-methods"),
+      allowHeaders:preflight.headers.get("access-control-allow-headers")
+    };
+    const corsOk=cors.allowOrigin===origin &&
+      (cors.allowMethods||"").toUpperCase().split(/[,\\s]+/).includes("PUT") &&
+      (cors.allowHeaders||"").toLowerCase().split(/[,\\s]+/).includes("content-type");
+    return res.json({
+      ok:true,
+      storage:"write_delete_passed",
+      corsPreflight:cors,
+      corsOk,
+      message:corsOk?"R2 write access and browser CORS preflight both passed.":"R2 credentials work, but R2 CORS preflight did not authorize the AHM browser upload."
+    });
   } catch(error) {
     console.error("R2 diagnostic failed",error.name,error.message);
-    return res.status(502).json({ok:false,stage:"r2_write_delete",error:error.name||"StorageError",message:"R2 write test failed. Check bucket credentials and permissions."});
+    return res.status(502).json({ok:false,stage:"r2_or_cors_test",error:error.name||"StorageError",message:"R2 diagnostic failed. Check storage settings."});
   }
 });
 
