@@ -148,7 +148,7 @@ app.post("/api/recap/browser-test", async (_req,res) => {
 });
 app.post("/api/recap/browser-test/cleanup", async (req,res) => {
   const objectKey=String(req.body?.objectKey||"");
-  if (!/^diagnostics\\/browser\\/[a-zA-Z0-9._-]+\\.mp4$/.test(objectKey))
+  if (!objectKey.startsWith("diagnostics/browser/") || !objectKey.endsWith(".mp4") || objectKey.includes("..") || objectKey.includes("\\\\"))
     return res.status(400).json({ok:false,error:"Invalid diagnostic object key."});
   try {
     await s3().send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:objectKey}));
