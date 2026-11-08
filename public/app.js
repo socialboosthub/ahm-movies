@@ -11,24 +11,16 @@ async function browserUploadCheck(){
  const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
  const report=(result,message="")=>api("/api/recap/browser-test/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({result,message,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
  try{
-  await new Promise((resolve,reject)=>{
-   const xhr=new XMLHttpRequest();
-   xhr.open("PUT",signed.uploadUrl);
-   xhr.withCredentials=false;
-   xhr.timeout=20000;
-   xhr.setRequestHeader("Content-Type","video/mp4");
-   xhr.onload=()=>xhr.status>=200&&xhr.status<300?resolve():reject(new Error("R2 browser test returned HTTP "+xhr.status+"."));
-   xhr.onerror=()=>reject(new Error("This browser could not complete a tiny upload to R2 (network/CORS, status "+xhr.status+")."));
-   xhr.ontimeout=()=>reject(new Error("The browser-to-R2 test timed out."));
-   xhr.onabort=()=>reject(new Error("The browser-to-R2 test was cancelled."));
-   xhr.send(new Blob([new Uint8Array([65,72,77,45,82,50])],{type:"video/mp4"}));
-  });
+  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array([65,72,77,45,82,50])],{type:"video/mp4"}),"video/mp4",null,20000);
+  const etag=xhr.getResponseHeader("ETag");
+  if(!etag)throw new Error("R2 did not expose the ETag needed to finish multipart uploads.");
+  await api("/api/recap/browser-test/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId,etag})});
   await report("passed");
  } catch(e) {
   await report("failed",e.message);
   throw e;
  } finally {
-  await api("/api/recap/browser-test/cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey})}).catch(()=>{});
+  await api("/api/recap/browser-test/cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId})}).catch(()=>{});
  }
 }
 async function checkHealth(){
