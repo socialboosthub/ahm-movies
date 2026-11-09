@@ -2,33 +2,48 @@
 
 Movie-to-recap editor using only footage from the uploaded original movie.
 
-## Implemented workflow
-1. Browser requests a short-lived Cloudflare R2 upload URL from Vercel.
-2. Browser uploads the full movie directly to R2, bypassing Vercel request-size limits.
-3. Vercel starts a background job on the separate processing worker.
-4. Worker downloads the full movie, extracts its audio with FFmpeg, and transcribes the entire film using faster-whisper.
-5. Transcript is summarized in chronological windows and sent to an OpenAI-compatible LLM (default Groq) to create timestamped recap beats that include the actual ending.
-6. Edge TTS generates narration; faster-whisper word timestamps from the generated narration drive subtitle phrase timing.
-7. FFmpeg selects only original movie footage by source timestamps, crops to 3:4, burns bold white uppercase italic subtitles, and creates three MP4 files.
-8. Exports are stored in R2 and returned as temporary download links.
+## Processing workflow
+1. The browser requests a short-lived Cloudflare R2 upload URL from Vercel.
+2. The browser uploads the original movie directly to the private R2 bucket.
+3. Vercel starts a job on the separate AHM processing worker.
+4. The worker downloads the movie, extracts the complete audio with FFmpeg, and transcribes the movie using Groq Whisper (with local faster-whisper as a fallback).
+5. The transcript is analysed chronologically with Groq to create a recap that covers the actual ending.
+6. Edge TTS creates narration; word timestamps drive subtitle timing.
+7. FFmpeg uses only footage from the original movie, crops to 3:4, adds subtitles, and renders three MP4 episodes.
+8. The three exports are stored in R2 and returned as temporary download links.
 
-## Deployment configuration
+## Recommended free worker: Kaggle GPU
 
-### Cloudflare R2
-Create a private bucket and scoped read/write key. Configure on both Vercel and Render: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
+The repository includes `kaggle/AHM_Movies_Kaggle_Worker.ipynb`.
 
-### Render worker
-Deploy `render.yaml` as a Blueprint. Set `RECAP_WORKER_TOKEN` to a long random secret, add `GROQ_API_KEY`, and configure the R2 values. The worker uses CPU faster-whisper (`small`, `int8`) by default; long movies may take significant time and need a persistent service with sufficient RAM/CPU.
+1. Open the notebook in Kaggle and turn **Internet ON**.
+2. Select a GPU accelerator in Notebook Settings (P100/T4 availability depends on Kaggle's current quota).
+3. Run the notebook from the first cell in order.
+4. Enter the existing R2 and Groq credentials only in the private prompts.
+5. Copy the generated worker token and temporary tunnel URL into the Vercel **Preview** environment for branch `feature/kaggle-worker`:
+   - `RECAP_WORKER_URL` = printed trycloudflare URL, without a trailing slash
+   - `RECAP_WORKER_TOKEN` = generated token
+6. Keep the Kaggle session running while a movie is processing.
 
-### Vercel
-Set `RECAP_WORKER_URL` to the Render service URL, plus the same `RECAP_WORKER_TOKEN` and R2 variables. Deploy the `feature/movie-recap-rebuild` branch as a Preview and test a movie before promoting to production.
+The notebook stops if no GPU is detected; it will not silently run a long movie job on CPU. Kaggle's free GPU quota, internet availability, and session duration are controlled by Kaggle and are not guaranteed. A stopped/restarted session interrupts jobs and creates a new temporary tunnel URL/token. Test the Preview deployment with a short clip before attempting a full movie. Do not switch Production until the complete three-part workflow has been verified.
+
+## Cloudflare R2
+
+Keep the bucket private and use a scoped read/write key. Vercel needs:
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_BUCKET`
+
+For browser uploads, configure R2 CORS to allow the exact AHM Vercel origin, `PUT`, request header `Content-Type`, and expose response header `ETag`.
+
+## Vercel
+
+Keep the existing Vercel app and R2 environment variables. Set `RECAP_WORKER_URL` and `RECAP_WORKER_TOKEN` for the Kaggle Preview branch first. The worker URL and token are session-specific; update them after starting a new Kaggle session.
 
 ## Operational limitations
-- No paid service is activated by this repository. Groq/Render/R2 usage may incur charges according to the selected plans.
-- Worker job state is currently held in process memory; a worker restart during processing loses that job status.
-- Subtitle phrases use word-level timestamps from the generated voice audio.
+
+- Kaggle GPU availability and session limits are not guaranteed on the free tier.
+- Worker job state is held in process memory; a worker restart loses active job status.
+- Export download links expire after seven days.
 - Only process movies you have permission to use.
-
-
-### Cloudflare R2 browser upload CORS
-In the R2 bucket CORS settings, allow your deployed AHM Movies origin (and the Vercel preview origin while testing), method `PUT`, and request header `Content-Type`. Expose the `ETag` response header if your browser tooling needs it. Keep the bucket private; the app uses signed upload and download URLs.
