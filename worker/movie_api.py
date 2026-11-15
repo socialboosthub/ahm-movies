@@ -14,9 +14,29 @@ MODEL=None
 def auth(token):
  expected=os.getenv("RECAP_WORKER_TOKEN","")
  if not expected or token!=expected: raise HTTPException(401,"Unauthorized worker request.")
+def save_job(job_id, job):
+ try:
+  body=json.dumps(job,ensure_ascii=False).encode("utf-8")
+  store().put_object(Bucket=os.environ["R2_BUCKET"],Key=f"jobs/{job_id}.json",Body=body,ContentType="application/json")
+ except Exception as exc:
+  print("Job-state persistence warning:",str(exc)[:300])
+def load_job(job_id):
+ with LOCK:
+  cached=JOBS.get(job_id)
+ if cached:return cached
+ try:
+  obj=store().get_object(Bucket=os.environ["R2_BUCKET"],Key=f"jobs/{job_id}.json")
+  job=json.loads(obj["Body"].read().decode("utf-8"))
+  with LOCK:JOBS[job_id]=job
+  return job
+ except Exception:return None
 def update(job_id,**values):
  with LOCK:
-  if job_id in JOBS:JOBS[job_id].update(values)
+  if job_id in JOBS:
+   JOBS[job_id].update(values)
+   snapshot=dict(JOBS[job_id])
+  else:snapshot=None
+ if snapshot:save_job(job_id,snapshot)
 def run(cmd):
  r=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
  if r.returncode:raise RuntimeError((r.stderr or r.stdout)[-2200:])
@@ -240,12 +260,14 @@ async def create(payload:dict,background:BackgroundTasks,x_ahm_worker_token:str|
  auth(x_ahm_worker_token)
  if not str(payload.get("object_key","")).startswith("incoming/"):raise HTTPException(400,"Invalid movie object key.")
  jid=uuid.uuid4().hex
- with LOCK:JOBS[jid]={"id":jid,"status":"queued","stage":"Waiting for worker","progress":0,"created_at":time.time()}
+ job={"id":jid,"status":"queued","stage":"Waiting for worker","progress":0,"created_at":time.time()}
+ with LOCK:JOBS[jid]=job
+ save_job(jid,job)
  background.add_task(process,jid,payload)
  return {"id":jid,"status":"queued","stage":"Waiting for worker","progress":0}
 @app.get("/jobs/{job_id}")
 def get_job(job_id:str,x_ahm_worker_token:str|None=Header(default=None)):
  auth(x_ahm_worker_token)
- with LOCK:job=JOBS.get(job_id)
- if not job:raise HTTPException(404,"Job not found. The worker may have restarted.")
+ job=load_job(job_id)
+ if not job:raise HTTPException(404,"Job not found.")
  return job
