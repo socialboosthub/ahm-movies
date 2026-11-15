@@ -1,0 +1,35 @@
+name: Deploy AHM Movies worker to Modal
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/modal-worker
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-modal-worker.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy worker
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal
+        run: python -m pip install --upgrade modal
+
+      - name: Deploy worker
+        run: modal deploy worker/modal_app.py
