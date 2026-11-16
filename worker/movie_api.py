@@ -3,7 +3,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 import boto3,httpx,edge_tts
-from fastapi import FastAPI,Header,HTTPException,BackgroundTasks
+from fastapi import FastAPI,Header,HTTPException
 from faster_whisper import WhisperModel
 
 app=FastAPI(title="AHM Movies Recap Worker",version="1.0.0")
@@ -256,14 +256,22 @@ async def process(job_id,payload):
 def health():
  return {"ok":True,"service":"ahm-movies-worker","storage_configured":all(os.getenv(x) for x in ["R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"]),"llm_configured":bool(os.getenv("GROQ_API_KEY"))}
 @app.post("/jobs")
-async def create(payload:dict,background:BackgroundTasks,x_ahm_worker_token:str|None=Header(default=None)):
+async def create(payload:dict,x_ahm_worker_token:str|None=Header(default=None)):
  auth(x_ahm_worker_token)
  if not str(payload.get("object_key","")).startswith("incoming/"):raise HTTPException(400,"Invalid movie object key.")
  jid=uuid.uuid4().hex
  job={"id":jid,"status":"queued","stage":"Waiting for worker","progress":0,"created_at":time.time()}
  with LOCK:JOBS[jid]=job
  save_job(jid,job)
- background.add_task(process,jid,payload)
+ dispatcher=getattr(app.state,"dispatch_job",None)
+ if dispatcher is not None:
+  try:dispatcher(jid,payload)
+  except Exception as exc:
+   update(jid,status="failed",stage="Could not queue processing job",error=str(exc)[:800])
+   raise HTTPException(503,"The movie processing queue is temporarily unavailable.")
+ else:
+  # Local-development fallback only. Modal deployments always use a separate durable function.
+  asyncio.create_task(process(jid,payload))
  return {"id":jid,"status":"queued","stage":"Waiting for worker","progress":0}
 @app.get("/jobs/{job_id}")
 def get_job(job_id:str,x_ahm_worker_token:str|None=Header(default=None)):
