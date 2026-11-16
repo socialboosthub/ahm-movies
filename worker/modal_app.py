@@ -29,7 +29,6 @@ worker_secrets = [modal.Secret.from_name("ahm-movies-secrets")]
     secrets=worker_secrets,
     cpu=4,
     memory=16384,
-    ephemeral_disk=102400,
     timeout=86400,
     max_containers=1,
 )
