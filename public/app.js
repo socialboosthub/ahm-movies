@@ -38,7 +38,7 @@ async function checkHealth(){
     $("serviceNote").textContent="Storage, processing worker and this browser's upload connection are verified.";
     updateStart();
    } catch(e) {
-    setConnection("Upload check failed",false);
+    setConnection("Upload check failed: "+e.message,false);
     $("serviceNote").textContent=e.message;
     $("startBtn").disabled=true;
     status("Browser upload connection could not be verified.","error");
