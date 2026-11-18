@@ -96,10 +96,16 @@ app.post("/api/recap/browser-test", async (_req,res) => {
     }),{expiresIn:600});
     res.json({ok:true,uploadUrl,objectKey,uploadId:created.UploadId});
   } catch(error) {
-    const code=String(error?.Code || error?.code || error?.name || "UnknownStorageError").slice(0,100);
+    const code=String(error?.Code || error?.code || error?.cause?.code || error?.name || "UnknownStorageError").slice(0,100);
     const requestId=String(error?.$metadata?.requestId || "").slice(0,80);
-    console.error("browser multipart test signing failed",code,error.message,requestId);
-    res.status(500).json({ok:false,error:"Could not prepare browser multipart test ("+code+")."});
+    const rawDetail=String(error?.cause?.message || error?.message || "No additional error detail");
+    const detail=rawDetail
+      .replace(/https?:\\/\\/[^\\s]+/g,"[R2 endpoint]")
+      .replace(/[a-f0-9]{32}/gi,"[account id]")
+      .replace(/(accesskey|secretkey|authorization)[^,; ]*/gi,"[credential redacted]")
+      .slice(0,240);
+    console.error("browser multipart test signing failed",JSON.stringify({code,detail,requestId,causeCode:error?.cause?.code}));
+    res.status(500).json({ok:false,error:"Could not prepare browser multipart test ("+code+"): "+detail});
   }
 });
 app.post("/api/recap/browser-test/complete", async (req,res) => {
