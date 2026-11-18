@@ -96,8 +96,10 @@ app.post("/api/recap/browser-test", async (_req,res) => {
     }),{expiresIn:600});
     res.json({ok:true,uploadUrl,objectKey,uploadId:created.UploadId});
   } catch(error) {
-    console.error("browser multipart test signing failed",error.name,error.message);
-    res.status(500).json({ok:false,error:"Could not prepare browser multipart test."});
+    const code=String(error?.Code || error?.code || error?.name || "UnknownStorageError").slice(0,100);
+    const requestId=String(error?.$metadata?.requestId || "").slice(0,80);
+    console.error("browser multipart test signing failed",code,error.message,requestId);
+    res.status(500).json({ok:false,error:"Could not prepare browser multipart test ("+code+")."});
   }
 });
 app.post("/api/recap/browser-test/complete", async (req,res) => {
