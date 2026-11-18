@@ -15,11 +15,12 @@ def auth(token):
  expected=os.getenv("RECAP_WORKER_TOKEN","")
  if not expected or token!=expected: raise HTTPException(401,"Unauthorized worker request.")
 def save_job(job_id, job):
+ body=json.dumps(job,ensure_ascii=False).encode("utf-8")
  try:
-  body=json.dumps(job,ensure_ascii=False).encode("utf-8")
   store().put_object(Bucket=os.environ["R2_BUCKET"],Key=f"jobs/{job_id}.json",Body=body,ContentType="application/json")
  except Exception as exc:
-  print("Job-state persistence warning:",str(exc)[:300])
+  print("JOB_STATE_SAVE_FAILED",job_id,type(exc).__name__,str(exc)[:500],flush=True)
+  raise RuntimeError(f"Could not save job state to R2: {type(exc).__name__}: {str(exc)[:300]}") from exc
 def load_job(job_id):
  with LOCK:
   cached=JOBS.get(job_id)
@@ -29,7 +30,9 @@ def load_job(job_id):
   job=json.loads(obj["Body"].read().decode("utf-8"))
   with LOCK:JOBS[job_id]=job
   return job
- except Exception:return None
+ except Exception as exc:
+  print("JOB_STATE_LOAD_FAILED",job_id,type(exc).__name__,str(exc)[:500],flush=True)
+  raise RuntimeError(f"Could not load job state from R2: {type(exc).__name__}: {str(exc)[:300]}") from exc
 def update(job_id,**values):
  with LOCK:
   if job_id in JOBS:
