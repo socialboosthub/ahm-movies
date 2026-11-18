@@ -100,7 +100,7 @@ app.post("/api/recap/browser-test", async (_req,res) => {
     const requestId=String(error?.$metadata?.requestId || "").slice(0,80);
     const rawDetail=String(error?.cause?.message || error?.message || "No additional error detail");
     const detail=rawDetail
-      .replace(/https?:\\/\\/[^\\s]+/g,"[R2 endpoint]")
+      .replace(/https?:\/\/[^\s]+/g,"[R2 endpoint]")
       .replace(/[a-f0-9]{32}/gi,"[account id]")
       .replace(/(accesskey|secretkey|authorization)[^,; ]*/gi,"[credential redacted]")
       .slice(0,240);
