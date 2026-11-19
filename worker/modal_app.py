@@ -1,5 +1,6 @@
 # Redeploy marker: refresh Modal containers after R2 secret rotation.
 # Redeploy after correcting R2_ACCOUNT_ID in ahm-movies-secrets.
+# Redeploy to expose complete worker-side processing errors in Modal logs.
 """Modal deployment for AHM Movies.
 
 The HTTP API handles uploads/status requests. Each movie is processed by a separate
