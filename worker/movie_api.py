@@ -46,8 +46,25 @@ def run(cmd):
  return r.stdout
 def store():
  required=["R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"]
- if any(not os.getenv(x) for x in required):raise RuntimeError("R2 storage environment is incomplete.")
- return boto3.client("s3",endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],region_name="auto")
+ missing=[name for name in required if not os.getenv(name) or not os.getenv(name).strip()]
+ if missing:
+  raise RuntimeError("R2 storage environment is incomplete: "+", ".join(missing))
+ # Accept either the bare Cloudflare account ID or its R2 endpoint/hostname.
+ # This avoids botocore ValueError when a dashboard URL was pasted into the ID field.
+ account=os.environ["R2_ACCOUNT_ID"].strip()
+ account=account.removeprefix("https://").removeprefix("http://").strip("/")
+ account=account.removesuffix(".r2.cloudflarestorage.com")
+ if "/" in account:
+  account=account.split("/",1)[0]
+ if not re.fullmatch(r"[a-fA-F0-9]{32}",account):
+  raise RuntimeError("R2_ACCOUNT_ID must be the 32-character Cloudflare account ID (not an API token or bucket URL).")
+ return boto3.client(
+  "s3",
+  endpoint_url=f"https://{account}.r2.cloudflarestorage.com",
+  aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"].strip(),
+  aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
+  region_name="auto",
+ )
 def whisper():
  global MODEL
  if MODEL is None:MODEL=WhisperModel(os.getenv("WHISPER_MODEL","small"),device=os.getenv("WHISPER_DEVICE","cpu"),compute_type=os.getenv("WHISPER_COMPUTE_TYPE","int8"))
