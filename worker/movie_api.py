@@ -1,4 +1,4 @@
-import os,re,json,time,uuid,asyncio,subprocess,tempfile,shutil
+import os,re,json,time,uuid,asyncio,subprocess,tempfile,shutil,traceback
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -121,7 +121,9 @@ async def transcribe_movie(path,duration,job_id):
   raise RuntimeError("Groq returned too little movie dialogue.")
  except Exception as error:
   update(job_id,stage="Remote transcription unavailable · using local Whisper",progress=12)
-  print("Groq movie transcription fallback:",str(error)[:300])
+  print("GROQ_TRANSCRIPTION_FALLBACK",job_id,type(error).__name__,str(error)[:1200],flush=True)
+  traceback.print_exc()
+  update(job_id,stage="Using local Whisper transcription",progress=12)
   return transcribe(path)
 async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events."):
  key=os.getenv("GROQ_API_KEY")
@@ -270,8 +272,16 @@ async def process(job_id,payload):
    s3.upload_file(str(out),os.environ["R2_BUCKET"],key,ExtraArgs={"ContentType":"video/mp4"})
    episodes.append({"title":f"Part {part}","part":part,"duration":f"{seconds//60}:{seconds%60:02}","download_url":download_url(s3,key)})
   update(job_id,status="completed",stage="Three recap episodes ready",progress=100,episodes=episodes,recap_script=recap)
- except Exception as exc:update(job_id,status="failed",stage="Processing failed",error=str(exc)[:1200])
- finally:shutil.rmtree(tmp,ignore_errors=True)
+ except Exception as exc:
+  print("AHM_JOB_PROCESSING_FAILED",job_id,type(exc).__name__,str(exc)[:1200],flush=True)
+  traceback.print_exc()
+  try:
+   update(job_id,status="failed",stage="Processing failed",error=f"{type(exc).__name__}: {str(exc)}"[:1200])
+  except Exception as state_exc:
+   print("AHM_JOB_FAILURE_STATE_SAVE_FAILED",job_id,type(state_exc).__name__,str(state_exc)[:1200],flush=True)
+   traceback.print_exc()
+ finally:
+  shutil.rmtree(tmp,ignore_errors=True)
 @app.get("/health")
 def health():
  return {"ok":True,"service":"ahm-movies-worker","storage_configured":all(os.getenv(x) for x in ["R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"]),"llm_configured":bool(os.getenv("GROQ_API_KEY"))}
