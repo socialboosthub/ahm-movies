@@ -2,7 +2,7 @@ import os,re,json,time,uuid,asyncio,subprocess,tempfile,shutil,traceback
 from pathlib import Path
 from threading import Lock
 from typing import Any
-import boto3,httpx,edge_tts
+import boto3,httpx,requests,edge_tts
 from fastapi import FastAPI,Header,HTTPException
 from faster_whisper import WhisperModel
 
@@ -21,10 +21,11 @@ def save_job(job_id, job):
  except Exception as exc:
   print("JOB_STATE_SAVE_FAILED",job_id,type(exc).__name__,str(exc)[:500],flush=True)
   raise RuntimeError(f"Could not save job state to R2: {type(exc).__name__}: {str(exc)[:300]}") from exc
-def load_job(job_id):
- with LOCK:
-  cached=JOBS.get(job_id)
- if cached:return cached
+def load_job(job_id,refresh=False):
+ if not refresh:
+  with LOCK:
+   cached=JOBS.get(job_id)
+  if cached:return cached
  try:
   obj=store().get_object(Bucket=os.environ["R2_BUCKET"],Key=f"jobs/{job_id}.json")
   job=json.loads(obj["Body"].read().decode("utf-8"))
@@ -87,16 +88,17 @@ async def transcribe_movie(path,duration,job_id):
  chunk_dir=path.parent/"groq-audio-chunks";chunk_dir.mkdir(parents=True,exist_ok=True)
  rows=[];detected="unknown"
  url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/audio/transcriptions"
+ def send_transcription(chunk,data):
+  with chunk.open("rb") as audio_file:
+   return requests.post(url,headers={"Authorization":f"Bearer {key}"},data=data,files={"file":(chunk.name,audio_file,"audio/mpeg")},timeout=(30,300))
  try:
-  async with httpx.AsyncClient(timeout=300) as client:
-   for index,start in enumerate(starts):
+  for index,start in enumerate(starts):
     chunk=chunk_dir/f"audio_{index:03}.mp3"
     length=min(chunk_seconds,duration-start)
     run(["ffmpeg","-y","-ss",str(start),"-t",str(length),"-i",str(path),"-vn","-ac","1","-ar","16000","-b:a","48k",str(chunk)])
     data=[("model","whisper-large-v3-turbo"),("response_format","verbose_json"),("timestamp_granularities[]","segment"),("temperature","0")]
     for attempt in range(6):
-     with chunk.open("rb") as audio_file:
-      response=await client.post(url,headers={"Authorization":f"Bearer {key}"},data=data,files={"file":(chunk.name,audio_file,"audio/mpeg")})
+     response=await asyncio.to_thread(send_transcription,chunk,data)
      if response.status_code in (429,500,502,503,504) and attempt<5:
       retry=response.headers.get("retry-after")
       try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
@@ -130,7 +132,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
  url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions"
  model=os.getenv("LLM_MODEL","openai/gpt-oss-20b")
- payload={"model":model,"temperature":0.2,"max_completion_tokens":4096,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":prompt}]}
+ payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":prompt}]}
  if model.startswith("openai/gpt-oss/") or model.startswith("openai/gpt-oss-"):
   payload["reasoning_effort"]=os.getenv("LLM_REASONING_EFFORT","medium")
  async with httpx.AsyncClient(timeout=240) as client:
@@ -310,6 +312,6 @@ async def create(payload:dict,x_ahm_worker_token:str|None=Header(default=None)):
 @app.get("/jobs/{job_id}")
 def get_job(job_id:str,x_ahm_worker_token:str|None=Header(default=None)):
  auth(x_ahm_worker_token)
- job=load_job(job_id)
+ job=load_job(job_id,refresh=True)
  if not job:raise HTTPException(404,"Job not found.")
  return job
