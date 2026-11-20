@@ -93,30 +93,30 @@ async def transcribe_movie(path,duration,job_id):
    return requests.post(url,headers={"Authorization":f"Bearer {key}"},data=data,files={"file":(chunk.name,audio_file,"audio/mpeg")},timeout=(30,300))
  try:
   for index,start in enumerate(starts):
-    chunk=chunk_dir/f"audio_{index:03}.mp3"
-    length=min(chunk_seconds,duration-start)
-    run(["ffmpeg","-y","-ss",str(start),"-t",str(length),"-i",str(path),"-vn","-ac","1","-ar","16000","-b:a","48k",str(chunk)])
-    data=[("model","whisper-large-v3-turbo"),("response_format","verbose_json"),("timestamp_granularities[]","segment"),("temperature","0")]
-    for attempt in range(6):
-     response=await asyncio.to_thread(send_transcription,chunk,data)
-     if response.status_code in (429,500,502,503,504) and attempt<5:
-      retry=response.headers.get("retry-after")
-      try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
-      except ValueError:delay=min(30,2**attempt*2)
-      await asyncio.sleep(delay)
-      continue
-     response.raise_for_status()
-     result=response.json()
-     detected=result.get("language",detected)
-     for segment in result.get("segments",[]):
-      text_value=str(segment.get("text","")).strip()
-      if not text_value:continue
-      a=max(0.0,start+float(segment.get("start",0)))
-      b=min(duration,start+float(segment.get("end",0)))
-      if b>a:rows.append({"start":a,"end":b,"text":text_value})
-     break
-    else:raise RuntimeError("Groq transcription retry limit reached.")
-    update(job_id,stage=f"Transcribing full movie · audio section {index+1}/{len(starts)}",progress=12+int((index+1)/len(starts)*20))
+   chunk=chunk_dir/f"audio_{index:03}.mp3"
+   length=min(chunk_seconds,duration-start)
+   run(["ffmpeg","-y","-ss",str(start),"-t",str(length),"-i",str(path),"-vn","-ac","1","-ar","16000","-b:a","48k",str(chunk)])
+   data=[("model","whisper-large-v3-turbo"),("response_format","verbose_json"),("timestamp_granularities[]","segment"),("temperature","0")]
+   for attempt in range(6):
+    response=await asyncio.to_thread(send_transcription,chunk,data)
+    if response.status_code in (429,500,502,503,504) and attempt<5:
+     retry=response.headers.get("retry-after")
+     try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
+     except ValueError:delay=min(30,2**attempt*2)
+     await asyncio.sleep(delay)
+     continue
+    response.raise_for_status()
+    result=response.json()
+    detected=result.get("language",detected)
+    for segment in result.get("segments",[]):
+     text_value=str(segment.get("text","")).strip()
+     if not text_value:continue
+     a=max(0.0,start+float(segment.get("start",0)))
+     b=min(duration,start+float(segment.get("end",0)))
+     if b>a:rows.append({"start":a,"end":b,"text":text_value})
+    break
+   else:raise RuntimeError("Groq transcription retry limit reached.")
+   update(job_id,stage=f"Transcribing full movie · audio section {index+1}/{len(starts)}",progress=12+int((index+1)/len(starts)*20))
   if len(rows)>=5:
    rows.sort(key=lambda item:item["start"])
    return rows,detected
