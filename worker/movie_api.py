@@ -137,6 +137,10 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
   for attempt in range(6):
    try:
     r=await client.post(url,headers={"Authorization":f"Bearer {key}"},json=payload)
+    if r.status_code == 400:
+     detail=r.text[:1600]
+     print("GROQ_CHAT_COMPLETION_BAD_REQUEST",model,detail,flush=True)
+     raise RuntimeError(f"Groq rejected the recap request (HTTP 400): {detail}")
     if r.status_code in (429,500,502,503,504) and attempt<5:
      retry=r.headers.get("retry-after")
      try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
