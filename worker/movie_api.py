@@ -132,22 +132,22 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
  url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions"
  model=os.getenv("LLM_MODEL","openai/gpt-oss-20b")
- # Use JSON Object Mode instead of Groq schema validation. This avoids the
- # recurring json_validate_failed 400 while keeping strict local validation.
- json_prompt=prompt+"\n\nOUTPUT REQUIREMENT: Return exactly one valid JSON object. Do not use markdown fences, comments, or text before or after the JSON."
- payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_object"},"reasoning_format":"hidden","messages":[{"role":"system","content":system+" Respond only with one valid JSON object. Do not include markdown."},{"role":"user","content":json_prompt}]}
+ if not schema:raise RuntimeError("A strict JSON schema is required for recap generation.")
+ # GPT-OSS 20B supports Groq strict structured outputs. Strict mode
+ # prevents the provider's best-effort JSON validator from rejecting
+ # generated recap text with json_validate_failed.
+ payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_schema","json_schema":{"name":schema_name,"strict":True,"schema":schema}},"reasoning_format":"hidden","messages":[{"role":"system","content":system+" Follow the supplied JSON schema exactly. Do not add commentary."},{"role":"user","content":prompt}]}
  if model.startswith("openai/gpt-oss/") or model.startswith("openai/gpt-oss-"):
   payload["reasoning_effort"]=os.getenv("LLM_REASONING_EFFORT","medium")
- async with httpx.AsyncClient(timeout=240) as client:
-  last_error=None
-  for attempt in range(3):
+ async with httpx.AsyncClient(timeout=300) as client:
+  for attempt in range(4):
    try:
     r=await client.post(url,headers={"Authorization":f"Bearer {key}"},json=payload)
     if r.status_code == 400:
      detail=r.text[:1600]
-     print("GROQ_CHAT_COMPLETION_BAD_REQUEST",model,detail,flush=True)
-     raise RuntimeError(f"Groq rejected the JSON-mode recap request (HTTP 400): {detail}")
-    if r.status_code in (429,500,502,503,504) and attempt<2:
+     print("GROQ_STRICT_STRUCTURED_OUTPUT_FAILED",model,schema_name,detail,flush=True)
+     raise RuntimeError(f"Groq rejected strict structured recap generation (HTTP 400): {detail}")
+    if r.status_code in (429,500,502,503,504) and attempt<3:
      retry=r.headers.get("retry-after")
      try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
      except ValueError:delay=min(30,2**attempt*2)
@@ -156,19 +156,14 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
     r.raise_for_status()
     message=r.json()["choices"][0]["message"]
     raw=(message.get("content") or "").strip()
-    if raw.startswith("```"):raw="\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
-    if not raw:raise ValueError("Groq returned an empty JSON response.")
+    if not raw:raise RuntimeError("Groq returned an empty structured recap.")
     parsed=json.loads(raw)
-    if not isinstance(parsed,dict):raise ValueError("Groq JSON response was not an object.")
+    if not isinstance(parsed,dict):raise ValueError("Groq structured response was not a JSON object.")
     return parsed
-   except (json.JSONDecodeError,ValueError) as exc:
-    last_error=exc
-    print("GROQ_JSON_PARSE_RETRY",schema_name,attempt+1,str(exc)[:500],flush=True)
-    payload["messages"][1]["content"]=json_prompt+"\n\nYour previous response was invalid. Return a complete JSON object with the required keys. No extra text."
    except httpx.RequestError:
-    if attempt>=2:raise
+    if attempt>=3:raise
     await asyncio.sleep(min(30,2**attempt*2))
-  raise RuntimeError(f"Groq did not return valid JSON after 3 attempts: {last_error}")
+  raise RuntimeError("Groq is temporarily unavailable after four structured-output attempts.")
 async def plan_recap(rows,duration,settings):
  chunks=[];buf=[];size=0
  for row in rows:
