@@ -127,12 +127,13 @@ async def transcribe_movie(path,duration,job_id):
   traceback.print_exc()
   update(job_id,stage="Using local Whisper transcription",progress=12)
   return transcribe(path)
-async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events."):
+async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events.",schema_name="movie_section",schema=None):
  key=os.getenv("GROQ_API_KEY")
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
  url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions"
  model=os.getenv("LLM_MODEL","openai/gpt-oss-20b")
- payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":system},{"role":"user","content":prompt}]}
+ if not schema:raise RuntimeError("A strict JSON schema is required for recap generation.")
+ payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_schema","json_schema":{"name":schema_name,"strict":True,"schema":schema}},"messages":[{"role":"system","content":system},{"role":"user","content":prompt}]}
  if model.startswith("openai/gpt-oss/") or model.startswith("openai/gpt-oss-"):
   payload["reasoning_effort"]=os.getenv("LLM_REASONING_EFFORT","medium")
  async with httpx.AsyncClient(timeout=240) as client:
@@ -142,7 +143,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
     if r.status_code == 400:
      detail=r.text[:1600]
      print("GROQ_CHAT_COMPLETION_BAD_REQUEST",model,detail,flush=True)
-     raise RuntimeError(f"Groq rejected the recap request (HTTP 400): {detail}")
+     raise RuntimeError(f"Groq rejected the structured recap request (HTTP 400): {detail}")
     if r.status_code in (429,500,502,503,504) and attempt<5:
      retry=r.headers.get("retry-after")
      try:delay=max(1,min(60,float(retry))) if retry else min(30,2**attempt*2)
@@ -150,7 +151,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
      await asyncio.sleep(delay)
      continue
     r.raise_for_status()
-    raw=r.json()["choices"][0]["message"]["content"].strip()
+    raw=(r.json()["choices"][0]["message"].get("content") or "").strip()
     if raw.startswith("```"):raw="\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
     return json.loads(raw)
    except httpx.RequestError:
@@ -166,12 +167,14 @@ async def plan_recap(rows,duration,settings):
  if buf:chunks.append("\n".join(buf))
  evidence=[]
  for i,chunk in enumerate(chunks):
-  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Return a JSON object with a summary string and an events array; each event has a timestamp, event description and character names.\n{chunk}")
+  section_schema={"type":"object","properties":{"summary":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"timestamp":{"type":"number"},"event":{"type":"string"},"characters":{"type":"array","items":{"type":"string"}}},"required":["timestamp","event","characters"],"additionalProperties":False}}},"required":["summary","events"],"additionalProperties":False}
+  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Return the summary and timestamped events with character names.\n{chunk}",schema_name="movie_section",schema=section_schema)
   evidence.append(data)
  ending_rows=rows[-max(12,min(40,len(rows))):]
  ending_text="\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
  prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; the final segment must select footage from the actual final dialogue or ending sequence, not unrelated end credits. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
- result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending.")
+ recap_schema={"type":"object","properties":{"title":{"type":"string"},"segments":{"type":"array","items":{"type":"object","properties":{"part":{"type":"integer","enum":[1,2,3]},"narration":{"type":"string"},"source_start":{"type":"number"},"source_end":{"type":"number"},"visual":{"type":"string"},"event":{"type":"string"}},"required":["part","narration","source_start","source_end","visual","event"],"additionalProperties":False}}},"required":["title","segments"],"additionalProperties":False}
+ result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending. Return only the requested structured data.",schema_name="movie_recap",schema=recap_schema)
  segments=result.get("segments",[])
  valid=[]
  for x in segments:
