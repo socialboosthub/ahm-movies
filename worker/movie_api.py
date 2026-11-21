@@ -134,7 +134,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
  model=os.getenv("LLM_MODEL","openai/gpt-oss-20b")
  # Use JSON Object Mode instead of Groq schema validation. This avoids the
  # recurring json_validate_failed 400 while keeping strict local validation.
- json_prompt=prompt+"\\n\\nOUTPUT REQUIREMENT: Return exactly one valid JSON object. Do not use markdown fences, comments, or text before or after the JSON."
+ json_prompt=prompt+"\n\nOUTPUT REQUIREMENT: Return exactly one valid JSON object. Do not use markdown fences, comments, or text before or after the JSON."
  payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_object"},"reasoning_format":"hidden","messages":[{"role":"system","content":system+" Respond only with one valid JSON object. Do not include markdown."},{"role":"user","content":json_prompt}]}
  if model.startswith("openai/gpt-oss/") or model.startswith("openai/gpt-oss-"):
   payload["reasoning_effort"]=os.getenv("LLM_REASONING_EFFORT","medium")
@@ -156,7 +156,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
     r.raise_for_status()
     message=r.json()["choices"][0]["message"]
     raw=(message.get("content") or "").strip()
-    if raw.startswith("```"):raw="\\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
+    if raw.startswith("```"):raw="\n".join(line for line in raw.splitlines() if not line.strip().startswith("```"))
     if not raw:raise ValueError("Groq returned an empty JSON response.")
     parsed=json.loads(raw)
     if not isinstance(parsed,dict):raise ValueError("Groq JSON response was not an object.")
@@ -164,7 +164,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
    except (json.JSONDecodeError,ValueError) as exc:
     last_error=exc
     print("GROQ_JSON_PARSE_RETRY",schema_name,attempt+1,str(exc)[:500],flush=True)
-    payload["messages"][1]["content"]=json_prompt+"\\n\\nYour previous response was invalid. Return a complete JSON object with the required keys. No extra text."
+    payload["messages"][1]["content"]=json_prompt+"\n\nYour previous response was invalid. Return a complete JSON object with the required keys. No extra text."
    except httpx.RequestError:
     if attempt>=2:raise
     await asyncio.sleep(min(30,2**attempt*2))
