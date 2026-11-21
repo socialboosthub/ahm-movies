@@ -188,7 +188,7 @@ function renderEpisodes(items){
   const card=document.createElement("article");card.className="episode";
   const title=document.createElement("h3");title.textContent=ep.title||"Part "+(i+1);
   const meta=document.createElement("p");meta.textContent=ep.duration||"MP4 · 3:4";
-  const link=document.createElement("a");link.href=ep.download_url;link.textContent="Download MP4";link.className="download";link.rel="noopener";
+  const link=document.createElement("a");link.href=ep.download_url;link.textContent="Download MP4";link.className="download";link.rel="noopener";link.setAttribute("download",(ep.title||"AHM_Movies_Part_"+(i+1)).replace(/[^a-z0-9_-]/gi,"_")+".mp4");
   card.append(title,meta,link);$("episodeList").append(card);
  });
  status("Your three-part recap is ready.","success");
