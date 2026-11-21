@@ -222,8 +222,43 @@ def stamp(t):
  ms=max(0,int(t*1000));h=ms//3600000;ms%=3600000;m=ms//60000;ms%=60000;s=ms//1000;ms%=1000
  return f"{h:02}:{m:02}:{s:02},{ms:03}"
 async def tts(text,voice,pace,path):
+ # Edge TTS can occasionally close its websocket without returning audio.
+ # Retry with the requested voice, then alternate voices; never pass an empty
+ # audio file into subtitle generation or FFmpeg.
  rate=f"{int((pace-1)*100):+d}%"
- await edge_tts.Communicate(text,voice=voice,rate=rate).save(str(path))
+ requested=voice or "en-US-AndrewNeural"
+ voices=[]
+ for candidate in (requested,"en-US-AriaNeural","en-US-GuyNeural"):
+  if candidate not in voices:voices.append(candidate)
+ errors=[]
+ for candidate in voices:
+  for attempt in range(3):
+   try:
+    if path.exists():path.unlink()
+    await edge_tts.Communicate(text,voice=candidate,rate=rate).save(str(path))
+    if path.exists() and path.stat().st_size>1024:
+     print("AHM_TTS_SUCCESS",candidate,"attempt",attempt+1,flush=True)
+     return
+    raise RuntimeError("Edge TTS returned an empty or incomplete audio file.")
+   except Exception as exc:
+    errors.append(f"{candidate} attempt {attempt+1}: {type(exc).__name__}: {str(exc)[:240]}")
+    print("AHM_TTS_RETRY",candidate,attempt+1,type(exc).__name__,str(exc)[:300],flush=True)
+    if path.exists():path.unlink()
+    if attempt<2:await asyncio.sleep(2*(attempt+1))
+ # Last-resort local speech keeps the job renderable during Edge TTS outages.
+ # The Modal image installs espeak-ng; this is a degraded emergency voice only.
+ espeak=shutil.which("espeak-ng") or shutil.which("espeak")
+ if espeak:
+  try:
+   language="en" if requested.startswith("en-") else ("sw" if requested.startswith("sw-") else "en")
+   speed=max(100,min(260,int(175*float(pace))))
+   run([espeak,"-v",language,"-s",str(speed),"-w",str(path),text])
+   if path.exists() and path.stat().st_size>1024:
+    print("AHM_TTS_LOCAL_FALLBACK",language,flush=True)
+    return
+  except Exception as exc:
+   errors.append(f"local fallback: {type(exc).__name__}: {str(exc)[:240]}")
+ raise RuntimeError("Speech generation failed after Edge TTS retries and local fallback. "+" | ".join(errors[-5:]))
 def subtitles(audio,text,path):
  rows,_=transcribe(audio,True);words=[w for s in rows for w in s.get("words",[])]
  if not words:
