@@ -15,7 +15,7 @@ WORKER_DIR = Path(__file__).resolve().parent
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "fonts-dejavu-core", "libgomp1")
+    .apt_install("ffmpeg", "fonts-dejavu-core", "libgomp1", "espeak-ng")
     .pip_install_from_requirements(str(WORKER_DIR / "requirements.txt"))
     .add_local_file(
         str(WORKER_DIR / "movie_api.py"),
