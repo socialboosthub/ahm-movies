@@ -1,3 +1,4 @@
+# Health verification enabled in the deployment workflow.
 # Redeploy marker: refresh Modal containers after R2 secret rotation.
 # Redeploy after correcting R2_ACCOUNT_ID in ahm-movies-secrets.
 # Redeploy to expose complete worker-side processing errors in Modal logs.
