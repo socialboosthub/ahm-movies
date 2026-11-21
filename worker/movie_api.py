@@ -359,6 +359,7 @@ async def process(job_id,payload):
    traceback.print_exc()
  finally:
   shutil.rmtree(tmp,ignore_errors=True)
+@app.get("/", include_in_schema=False)
 @app.get("/health")
 def health():
  return {"ok":True,"service":"ahm-movies-worker","storage_configured":all(os.getenv(x) for x in ["R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"]),"llm_configured":bool(os.getenv("GROQ_API_KEY"))}
