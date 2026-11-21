@@ -205,7 +205,13 @@ async def plan_recap(rows,duration,settings):
   if p in (1,2,3) and 0<=a<duration and a<b:
    x["part"]=p;x["source_start"]=a;x["source_end"]=min(duration,max(a+min(5,duration-a),min(b,a+25)));valid.append(x)
  if len(valid)<12:raise RuntimeError("The recap model did not return enough valid source-timestamped scenes. Retry the job.")
- valid.sort(key=lambda x:(x["part"],x["source_start"]))
+ # Put every recap scene in original-film time order before rendering. This prevents
+ # a later plot event from being narrated over footage from an earlier scene.
+ valid.sort(key=lambda x:x["source_start"])
+ # Rebuild the three episode boundaries from that chronological sequence so
+ # the exported parts cannot jump backwards in the movie timeline.
+ for index,scene in enumerate(valid):
+  scene["part"]=min(3,(index*3)//len(valid)+1)
  counts={p:sum(1 for x in valid if x["part"]==p) for p in (1,2,3)}
  if any(counts[p]<3 for p in (1,2,3)):
   raise RuntimeError("The recap plan did not create three complete story parts. Retry the job.")
@@ -271,7 +277,7 @@ def subtitles(audio,text,path):
  path.write_text("\n".join(blocks),encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=32,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=25,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
  cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
  if has_source_audio:
   mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
