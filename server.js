@@ -60,7 +60,7 @@ app.get("/api/recap/health", async (_req,res) => {
   let worker="not_configured";
   if (workerReady()) {
     try {
-      const probe=await workerRequest("/health");
+      const probe=await workerRequest("/");
       worker=probe && probe.ok===true ? "connected" : "unhealthy";
     } catch (error) {
       worker="unreachable";
