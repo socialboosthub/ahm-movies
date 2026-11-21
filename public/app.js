@@ -184,14 +184,25 @@ async function poll(){
 function renderEpisodes(items){
  $("results").hidden=false;$("episodeList").innerHTML="";
  if(!items.length){$("episodeList").textContent="The worker reported completion but did not return episode files. Check worker logs.";return;}
+ const downloads=[];
  items.forEach((ep,i)=>{
   const card=document.createElement("article");card.className="episode";
   const title=document.createElement("h3");title.textContent=ep.title||"Part "+(i+1);
   const meta=document.createElement("p");meta.textContent=ep.duration||"MP4 · 3:4";
-  const link=document.createElement("a");link.href=ep.download_url;link.textContent="Download MP4";link.className="download";link.rel="noopener";link.setAttribute("download",(ep.title||"AHM_Movies_Part_"+(i+1)).replace(/[^a-z0-9_-]/gi,"_")+".mp4");
+  const filename=(ep.title||"AHM_Movies_Part_"+(i+1)).replace(/[^a-z0-9_-]/gi,"_")+".mp4";
+  const link=document.createElement("a");link.href=ep.download_url;link.textContent="Download MP4";link.className="download";link.rel="noopener";link.setAttribute("download",filename);
+  link.addEventListener("click",e=>{e.preventDefault();startDownload(ep.download_url,filename);});
+  downloads.push({url:ep.download_url,filename});
   card.append(title,meta,link);$("episodeList").append(card);
  });
- status("Your three-part recap is ready.","success");
+ status("Your three-part recap is ready. Starting your MP4 downloads…","success");
+ // Start the downloads automatically when the finished episodes arrive.
+ // Keep the per-episode links as a fallback if the browser blocks multiple files.
+ downloads.forEach((item,index)=>setTimeout(()=>startDownload(item.url,item.filename),900+index*1800));
+}
+function startDownload(url,filename){
+ const link=document.createElement("a");link.href=url;link.download=filename;link.rel="noopener";link.style.display="none";
+ document.body.appendChild(link);link.click();link.remove();
 }
 $("startBtn").addEventListener("click",startJob);
 checkHealth();
