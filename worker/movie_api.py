@@ -127,7 +127,7 @@ async def transcribe_movie(path,duration,job_id):
   traceback.print_exc()
   update(job_id,stage="Using local Whisper transcription",progress=12)
   return transcribe(path)
-async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events.",schema_name="movie_section",schema=None):
+async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events.",schema_name="movie_section",schema=None,max_completion_tokens=2048):
  key=os.getenv("GROQ_API_KEY")
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
  url=os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions"
@@ -142,7 +142,7 @@ async def ask(prompt,system="You are a faithful movie-story analyst. Never inven
  last_error=None
  async with httpx.AsyncClient(timeout=300) as client:
   for model_index,model in enumerate(models):
-   payload={"model":model,"temperature":0.2,"max_completion_tokens":8192,"response_format":{"type":"json_schema","json_schema":{"name":schema_name,"strict":True,"schema":schema}},"reasoning_format":"hidden","messages":[{"role":"system","content":system+" Follow the supplied JSON schema exactly. Do not add commentary."},{"role":"user","content":prompt}]}
+   payload={"model":model,"temperature":0.2,"max_completion_tokens":max(512,min(4096,int(max_completion_tokens))),"response_format":{"type":"json_schema","json_schema":{"name":schema_name,"strict":True,"schema":schema}},"reasoning_format":"hidden","messages":[{"role":"system","content":system+" Follow the supplied JSON schema exactly. Do not add commentary."},{"role":"user","content":prompt}]}
    if model.startswith("openai/gpt-oss-") or model.startswith("openai/gpt-oss/"):
     payload["reasoning_effort"]=os.getenv("LLM_REASONING_EFFORT","medium")
    elif model.startswith("qwen/"):
@@ -190,13 +190,17 @@ async def plan_recap(rows,duration,settings):
  evidence=[]
  for i,chunk in enumerate(chunks):
   section_schema={"type":"object","properties":{"summary":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"timestamp":{"type":"number"},"event":{"type":"string"},"characters":{"type":"array","items":{"type":"string"}}},"required":["timestamp","event","characters"],"additionalProperties":False}}},"required":["summary","events"],"additionalProperties":False}
-  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Return the summary and timestamped events with character names.\n{chunk}",schema_name="movie_section",schema=section_schema)
-  evidence.append(data)
- ending_rows=rows[-max(12,min(40,len(rows))):]
+  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Keep the summary under 70 words and return no more than 3 important timestamped events with character names.\n{chunk}",schema_name="movie_section",schema=section_schema,max_completion_tokens=1100)
+  # Keep the final synthesis request compact even for feature-length movies.
+  compact_events=[]
+  for event in data.get("events",[])[:3]:
+   compact_events.append({"timestamp":event.get("timestamp"),"event":str(event.get("event",""))[:160],"characters":event.get("characters",[])[:5]})
+  evidence.append({"summary":str(data.get("summary",""))[:420],"events":compact_events})
+ ending_rows=rows[-max(10,min(16,len(rows))):]
  ending_text="\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
  prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 700-850 spoken words, 24-30 narration segments. Return JSON {{"title":"...","segments":[{{"part":1,"narration":"2-3 natural sentences","source_start":10,"source_end":24,"visual":"specific visible action","event":"plot event"}}]}}. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; the final segment must select footage from the actual final dialogue or ending sequence, not unrelated end credits. CRITICAL SYNCHRONIZATION RULES: Every segment must be placed at the exact chronological point where its narrated event happens. Use the timestamped transcript events as anchors. The selected source_start/source_end must contain dialogue or evidence for THAT narrated event, not a scene from earlier or later in the story. Do not reuse an earlier timestamp just because it has similar dialogue. Keep segments chronological within each part. If an event's timestamp is uncertain, choose the closest supported transcript timestamp and keep narration general rather than inventing a visual. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
  recap_schema={"type":"object","properties":{"title":{"type":"string"},"segments":{"type":"array","items":{"type":"object","properties":{"part":{"type":"integer","enum":[1,2,3]},"narration":{"type":"string"},"source_start":{"type":"number"},"source_end":{"type":"number"},"visual":{"type":"string"},"event":{"type":"string"}},"required":["part","narration","source_start","source_end","visual","event"],"additionalProperties":False}}},"required":["title","segments"],"additionalProperties":False}
- result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending. Return only the requested structured data.",schema_name="movie_recap",schema=recap_schema)
+ result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending. Return only the requested structured data.",schema_name="movie_recap",schema=recap_schema,max_completion_tokens=3000)
  segments=result.get("segments",[])
  valid=[]
  for x in segments:
