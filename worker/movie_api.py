@@ -289,7 +289,7 @@ def render(movie,audio,srt,start,end,out,has_source_audio=True):
 
 def download_url(s3,key):
  filename=Path(key).name.replace('"', "")
- return s3.generate_presigned_url("get_object",Params={"Bucket":os.environ["R2_BUCKET"],"Key":key,"ResponseContentType":"video/mp4","ResponseContentDisposition":f'attachment; filename="{filename}"'},ExpiresIn=604800)
+ return s3.generate_presigned_url("get_object",Params={"Bucket":os.environ["R2_BUCKET"],"Key":key,"ResponseContentType":"application/octet-stream","ResponseContentDisposition":f'attachment; filename="{filename}"'},ExpiresIn=604800)
 async def process(job_id,payload):
  tmp=Path(tempfile.mkdtemp(prefix="ahm-recap-"))
  try:
