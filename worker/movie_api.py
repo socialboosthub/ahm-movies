@@ -364,12 +364,12 @@ async def process(job_id,payload):
    out=tmp/f"AHM_Movies_Part_{part}.mp4"
    # Blend picture cuts with a short cinematic dissolve. Keep narration in a
    # straight chronological audio concat so words never overlap across scenes.
-   fade=min(0.45,max(0.20,min(clip_durations[part])/4))
+   fade=min(0.25,max(0.15,min(clip_durations[part])/8))
    inputs=[]
    filters=[]
    for index,clip_path in enumerate(clips[part]):
     inputs += ["-i",str(clip_path)]
-    filters.append(f"[{index}:v:0]settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v{index}]")
+    filters.append(f"[{index}:v:0]format=yuv420p[v{index}]")
     filters.append(f"[{index}:a:0]aresample=48000,aformat=channel_layouts=stereo,asetpts=PTS-STARTPTS[a{index}]")
    if len(clips[part])==1:
     filters += ["[v0]null[vout]","[a0]anull[aout]"]
@@ -383,8 +383,12 @@ async def process(job_id,payload):
      previous=output
      elapsed+=clip_durations[part][index]
     filters.append(f"[{previous}]null[vout]")
-    audio_inputs="".join(f"[a{i}]" for i in range(len(clips[part])))
-    filters.append(f"{audio_inputs}concat=n={len(clips[part])}:v=0:a=1[aout]")
+    audio_previous="a0"
+    for index in range(1,len(clips[part])):
+     audio_output=f"ax{index}"
+     filters.append(f"[{audio_previous}][a{index}]acrossfade=d={fade:.3f}:c1=tri:c2=tri[{audio_output}]")
+     audio_previous=audio_output
+    filters.append(f"[{audio_previous}]anull[aout]")
    run(["ffmpeg","-y",*inputs,"-filter_complex",";".join(filters),"-map","[vout]","-map","[aout]","-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","21","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart",str(out)])
    key=f"exports/{job_id}/AHM_Movies_Part_{part}.mp4"
    qc=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(out)]))
