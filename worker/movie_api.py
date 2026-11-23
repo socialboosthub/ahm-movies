@@ -303,10 +303,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
    token=str(w["word"]).replace("{","(").replace("}",")").upper()
    pieces.append("{\\kf"+str(duration)+"}"+token)
   lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{{\\an2\\bord3\\shad1}}"+ " ".join(pieces))
- path.write_text(header+"\\n".join(lines)+"\\n",encoding="utf-8")
+ path.write_text(header+"\n".join(lines)+"\n",encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")"
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")
  cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
  if has_source_audio:
   mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
