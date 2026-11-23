@@ -300,7 +300,7 @@ def subtitles(audio,text,path):
  path.write_text("\n".join(blocks),encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=25,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=18,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
  cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
  if has_source_audio:
   mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
@@ -346,7 +346,7 @@ async def process(job_id,payload):
    if clip_end-clip_start<needed:
     clip_end=min(duration,clip_start+needed)
     if clip_end-clip_start<needed:clip_start=max(0,clip_end-needed)
-   render(movie,audio_file,srt,clip_start,clip_end,clip,has_source_audio)
+   render(movie,audio_file,srt,clip_start,clip_end,clip,False)
    part=int(scene["part"]);clips[part].append(clip)
    durations[part]+=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(clip)]).strip())
    update(job_id,stage=f"Editing original footage · scene {i+1}/{total}",progress=45+int((i+1)/total*48))
