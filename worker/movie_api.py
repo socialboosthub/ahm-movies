@@ -200,15 +200,34 @@ async def plan_recap(rows,duration,settings):
  ending_text="\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
  prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 650-800 spoken words, 18-21 narration segments. Return the title FIRST, then the segments, in this exact JSON shape: {{"title":"Movie title","segments":[{{"part":1,"narration":"2 concise natural sentences","source_start":10,"source_end":24,"visual":"short specific visible action","event":"short plot event"}}]}}. Keep visual and event fields brief (under 12 words each); do not repeat narration in them. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; the final segment must select footage from the actual final dialogue or ending sequence, not unrelated end credits. CRITICAL SYNCHRONIZATION RULES: Every segment must be placed at the exact chronological point where its narrated event happens. Use the timestamped transcript events as anchors. The selected source_start/source_end must contain dialogue or evidence for THAT narrated event, not a scene from earlier or later in the story. Do not reuse an earlier timestamp just because it has similar dialogue. Keep segments chronological within each part. If an event's timestamp is uncertain, choose the closest supported transcript timestamp and keep narration general rather than inventing a visual. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
  recap_schema={"type":"object","properties":{"title":{"type":"string"},"segments":{"type":"array","items":{"type":"object","properties":{"part":{"type":"integer","enum":[1,2,3]},"narration":{"type":"string"},"source_start":{"type":"number"},"source_end":{"type":"number"},"visual":{"type":"string"},"event":{"type":"string"}},"required":["part","narration","source_start","source_end","visual","event"],"additionalProperties":False}}},"required":["title","segments"],"additionalProperties":False}
+ def collect_valid(items):
+  accepted=[]
+  for item in items:
+   try:
+    part=int(item.get("part",1));start=float(item["source_start"]);end=float(item["source_end"])
+   except (KeyError,TypeError,ValueError):
+    continue
+   if part in (1,2,3) and 0<=start<duration and start<end:
+    item["part"]=part
+    item["source_start"]=start
+    item["source_end"]=min(duration,max(start+min(5,duration-start),min(end,start+25)))
+    accepted.append(item)
+  return accepted
+
  result=await ask(prompt,"You are an expert movie recap editor. Preserve plot truth, maintain chronological continuity and include the entire ending. Return only the requested structured data.",schema_name="movie_recap",schema=recap_schema,max_completion_tokens=4096)
  segments=result.get("segments",[])
- valid=[]
- for x in segments:
-  try:p=int(x.get("part",1));a=float(x["source_start"]);b=float(x["source_end"])
-  except Exception:continue
-  if p in (1,2,3) and 0<=a<duration and a<b:
-   x["part"]=p;x["source_start"]=a;x["source_end"]=min(duration,max(a+min(5,duration-a),min(b,a+25)));valid.append(x)
- if len(valid)<12:raise RuntimeError("The recap model did not return enough valid source-timestamped scenes. Retry the job.")
+ valid=collect_valid(segments)
+ if len(valid)<12:
+  print("AHM_RECAP_TIMESTAMP_REPAIR","initial_segments",len(segments),"valid_segments",len(valid),flush=True)
+  repair_prompt=prompt+f"""
+
+REPAIR REQUIREMENT: The previous attempt did not provide enough usable source timestamps. Return EXACTLY 15 complete scenes, five for each part. Copy source_start values from numeric timestamps in the supplied timestamped evidence; do not invent timestamps or use timestamps outside 0..{duration:.1f}. For every scene set source_end later than source_start, 5-25 seconds after it, and no later than {duration:.1f}. Keep all 15 scenes in chronological story order. Keep narration concise enough to fit the response limit. Include every required JSON field."""
+  repaired=await ask(repair_prompt,"You are an expert movie recap editor. Return complete valid source-timestamped scenes. Preserve plot truth, chronological continuity and the actual ending. Return only structured JSON.",schema_name="movie_recap",schema=recap_schema,max_completion_tokens=4096)
+  segments=repaired.get("segments",[])
+  valid=collect_valid(segments)
+  print("AHM_RECAP_TIMESTAMP_REPAIR_RESULT","returned_segments",len(segments),"valid_segments",len(valid),flush=True)
+ if len(valid)<12:
+  raise RuntimeError(f"The recap model returned only {len(valid)} usable timestamped scenes from {len(segments)} scenes, but at least 12 are required. The movie was not rendered; retry the recap.")
  # Put every recap scene in original-film time order before rendering. This prevents
  # a later plot event from being narrated over footage from an earlier scene.
  valid.sort(key=lambda x:x["source_start"])
