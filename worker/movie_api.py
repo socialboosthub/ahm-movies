@@ -316,6 +316,28 @@ def render(movie,audio,srt,start,end,out,has_source_audio=True):
  cmd += ["-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","22","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-shortest","-movflags","+faststart",str(out)]
  run(cmd)
 
+def choose_music_track(scenes):
+ text_value=" ".join(str(scene.get("event",""))+" "+str(scene.get("narration","")) for scene in scenes).lower()
+ moods=[
+  (("fight","battle","attack","chase","escape","weapon","explosion","race","revenge"),"overdrive-signal-lost.mp3"),
+  (("death","danger","murder","secret","mystery","fear","dark","threat","betray","disappear"),"ash.mp3"),
+  (("hope","victory","save","rescue","love","reunite","freedom","success","together"),"horizon-monolith.mp3"),
+  (("memory","past","childhood","remember","family","goodbye","loss","sad","letter"),"old-photos-outlands.mp3"),
+  (("quiet","peace","calm","journey","travel","discover","beautiful"),"afterglow-vast.mp3"),
+ ]
+ for words,track in moods:
+  if any(word in text_value for word in words):return track
+ return "beneath.mp3"
+def download_music(track,directory):
+ directory.mkdir(parents=True,exist_ok=True)
+ path=directory/track
+ if path.exists() and path.stat().st_size>10000:return path
+ url="https://raw.githubusercontent.com/farmmer938-lgtm/aeris-cc0-music/main/tracks/"+track
+ response=requests.get(url,timeout=(15,60))
+ response.raise_for_status()
+ if len(response.content)<10000:raise RuntimeError("Free background music download was incomplete.")
+ path.write_bytes(response.content)
+ return path
 def download_url(s3,key):
  filename=Path(key).name.replace('"', "")
  return s3.generate_presigned_url("get_object",Params={"Bucket":os.environ["R2_BUCKET"],"Key":key,"ResponseContentType":"application/octet-stream","ResponseContentDisposition":f'attachment; filename="{filename}"'},ExpiresIn=604800)
@@ -389,7 +411,25 @@ async def process(job_id,payload):
      filters.append(f"[{audio_previous}][a{index}]acrossfade=d={fade:.3f}:c1=tri:c2=tri[{audio_output}]")
      audio_previous=audio_output
     filters.append(f"[{audio_previous}]anull[aout]")
-   run(["ffmpeg","-y",*inputs,"-filter_complex",";".join(filters),"-map","[vout]","-map","[aout]","-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","21","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart",str(out)])
+   # Add a quiet, automatically selected CC0 instrumental bed. The source film
+   # soundtrack remains muted; only narration and licensed background music are exported.
+   part_scenes=[scene for scene in recap["segments"] if int(scene.get("part",1))==part]
+   music_track=choose_music_track(part_scenes)
+   music_path=None
+   try:
+    music_path=download_music(music_track,tmp/"music")
+    music_duration=max(1.0,sum(clip_durations[part])-fade*(len(clip_durations[part])-1))
+    music_index=len(clips[part])
+    inputs += ["-stream_loop","-1","-i",str(music_path)]
+    fade_out=max(0.0,music_duration-2.0)
+    filters.append(f"[{music_index}:a:0]aresample=48000,volume=0.13,atrim=0:{music_duration:.3f},afade=t=in:st=0:d=1,afade=t=out:st={fade_out:.3f}:d={min(2.0,music_duration):.3f}[music]")
+    filters.append("[aout][music]amix=inputs=2:duration=first:dropout_transition=1:normalize=0,alimiter=limit=0.95[finalaudio]")
+    audio_map="[finalaudio]"
+    print("AHM_FREE_BACKGROUND_MUSIC",part,music_track,flush=True)
+   except Exception as music_error:
+    audio_map="[aout]"
+    print("AHM_FREE_BACKGROUND_MUSIC_UNAVAILABLE",part,type(music_error).__name__,str(music_error)[:300],flush=True)
+   run(["ffmpeg","-y",*inputs,"-filter_complex",";".join(filters),"-map","[vout]","-map",audio_map,"-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","21","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart",str(out)])
    key=f"exports/{job_id}/AHM_Movies_Part_{part}.mp4"
    qc=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(out)]))
    video_stream=next((x for x in qc.get("streams",[]) if x.get("codec_type")=="video"),None)
