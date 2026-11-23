@@ -287,7 +287,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,36,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,60,60,150,1
+Style: Default,DejaVu Sans,19,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,60,60,115,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -306,7 +306,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
  path.write_text(header+"\\n".join(lines)+"\\n",encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=18,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,SecondaryColour=&H0000D7FF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")"
  cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
  if has_source_audio:
   mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
@@ -337,7 +337,7 @@ async def process(job_id,payload):
   update(job_id,stage="Analysing characters, twists and the ending",progress=36,transcript_segments=len(transcript),detected_language=detected)
   recap=await plan_recap(transcript,duration,settings)
   (tmp/"recap_script.json").write_text(json.dumps(recap,ensure_ascii=False,indent=2),encoding="utf-8")
-  clips={1:[],2:[],3:[]};durations={1:0,2:0,3:0};total=len(recap["segments"])
+  clips={1:[],2:[],3:[]};clip_durations={1:[],2:[],3:[]};durations={1:0,2:0,3:0};total=len(recap["segments"])
   for i,scene in enumerate(recap["segments"]):
    narration=str(scene.get("narration","")).strip()
    if not narration:continue
@@ -354,15 +354,38 @@ async def process(job_id,payload):
     if clip_end-clip_start<needed:clip_start=max(0,clip_end-needed)
    render(movie,audio_file,srt,clip_start,clip_end,clip,False)
    part=int(scene["part"]);clips[part].append(clip)
-   durations[part]+=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(clip)]).strip())
+   clip_seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(clip)]).strip())
+   clip_durations[part].append(clip_seconds)
+   durations[part]+=clip_seconds
    update(job_id,stage=f"Editing original footage · scene {i+1}/{total}",progress=45+int((i+1)/total*48))
   episodes=[]
   for part in (1,2,3):
    if not clips[part]:raise RuntimeError(f"Episode {part} has no footage.")
-   listing=tmp/f"concat_{part}.txt"
-   listing.write_text("".join("file '"+str(p)+"'\n" for p in clips[part]),encoding="utf-8")
    out=tmp/f"AHM_Movies_Part_{part}.mp4"
-   run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-c","copy","-movflags","+faststart",str(out)])
+   # Blend picture cuts with a short cinematic dissolve. Keep narration in a
+   # straight chronological audio concat so words never overlap across scenes.
+   fade=min(0.45,max(0.20,min(clip_durations[part])/4))
+   inputs=[]
+   filters=[]
+   for index,clip_path in enumerate(clips[part]):
+    inputs += ["-i",str(clip_path)]
+    filters.append(f"[{index}:v:0]settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v{index}]")
+    filters.append(f"[{index}:a:0]aresample=48000,aformat=channel_layouts=stereo,asetpts=PTS-STARTPTS[a{index}]")
+   if len(clips[part])==1:
+    filters += ["[v0]null[vout]","[a0]anull[aout]"]
+   else:
+    previous="v0"
+    elapsed=clip_durations[part][0]
+    for index in range(1,len(clips[part])):
+     output=f"vx{index}"
+     offset=max(0.0,elapsed-fade*index)
+     filters.append(f"[{previous}][v{index}]xfade=transition=fade:duration={fade:.3f}:offset={offset:.3f}[{output}]")
+     previous=output
+     elapsed+=clip_durations[part][index]
+    filters.append(f"[{previous}]null[vout]")
+    audio_inputs="".join(f"[a{i}]" for i in range(len(clips[part])))
+    filters.append(f"{audio_inputs}concat=n={len(clips[part])}:v=0:a=1[aout]")
+   run(["ffmpeg","-y",*inputs,"-filter_complex",";".join(filters),"-map","[vout]","-map","[aout]","-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),"-crf","21","-pix_fmt","yuv420p","-r","30","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart",str(out)])
    key=f"exports/{job_id}/AHM_Movies_Part_{part}.mp4"
    qc=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(out)]))
    video_stream=next((x for x in qc.get("streams",[]) if x.get("codec_type")=="video"),None)
