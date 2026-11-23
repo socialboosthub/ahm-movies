@@ -251,56 +251,62 @@ def stamp(t):
  ms=max(0,int(t*1000));h=ms//3600000;ms%=3600000;m=ms//60000;ms%=60000;s=ms//1000;ms%=1000
  return f"{h:02}:{m:02}:{s:02},{ms:03}"
 async def tts(text,voice,pace,path):
- # Edge TTS can occasionally close its websocket without returning audio.
- # Retry with the requested voice, then alternate voices; never pass an empty
- # audio file into subtitle generation or FFmpeg.
+ # Keep one selected narrator voice for every scene and every episode.
+ # Retry that exact voice only; never silently switch to another voice.
  rate=f"{int((pace-1)*100):+d}%"
  requested=voice or "en-US-AndrewNeural"
- voices=[]
- for candidate in (requested,"en-US-AriaNeural","en-US-GuyNeural"):
-  if candidate not in voices:voices.append(candidate)
  errors=[]
- for candidate in voices:
-  for attempt in range(3):
-   try:
-    if path.exists():path.unlink()
-    await edge_tts.Communicate(text,voice=candidate,rate=rate).save(str(path))
-    if path.exists() and path.stat().st_size>1024:
-     print("AHM_TTS_SUCCESS",candidate,"attempt",attempt+1,flush=True)
-     return
-    raise RuntimeError("Edge TTS returned an empty or incomplete audio file.")
-   except Exception as exc:
-    errors.append(f"{candidate} attempt {attempt+1}: {type(exc).__name__}: {str(exc)[:240]}")
-    print("AHM_TTS_RETRY",candidate,attempt+1,type(exc).__name__,str(exc)[:300],flush=True)
-    if path.exists():path.unlink()
-    if attempt<2:await asyncio.sleep(2*(attempt+1))
- # Last-resort local speech keeps the job renderable during Edge TTS outages.
- # The Modal image installs espeak-ng; this is a degraded emergency voice only.
- espeak=shutil.which("espeak-ng") or shutil.which("espeak")
- if espeak:
+ for attempt in range(5):
   try:
-   language="en" if requested.startswith("en-") else ("sw" if requested.startswith("sw-") else "en")
-   speed=max(100,min(260,int(175*float(pace))))
-   run([espeak,"-v",language,"-s",str(speed),"-w",str(path),text])
+   if path.exists():path.unlink()
+   await edge_tts.Communicate(text,voice=requested,rate=rate).save(str(path))
    if path.exists() and path.stat().st_size>1024:
-    print("AHM_TTS_LOCAL_FALLBACK",language,flush=True)
+    print("AHM_TTS_SUCCESS",requested,"attempt",attempt+1,flush=True)
     return
+   raise RuntimeError("Edge TTS returned an empty or incomplete audio file.")
   except Exception as exc:
-   errors.append(f"local fallback: {type(exc).__name__}: {str(exc)[:240]}")
- raise RuntimeError("Speech generation failed after Edge TTS retries and local fallback. "+" | ".join(errors[-5:]))
+   errors.append(f"{requested} attempt {attempt+1}: {type(exc).__name__}: {str(exc)[:240]}")
+   print("AHM_TTS_RETRY_SAME_VOICE",requested,attempt+1,type(exc).__name__,str(exc)[:300],flush=True)
+   if path.exists():path.unlink()
+   if attempt<4:await asyncio.sleep(2*(attempt+1))
+ raise RuntimeError("The selected narrator voice could not be rendered. No alternate voice was substituted. "+" | ".join(errors[-5:]))
 def subtitles(audio,text,path):
- rows,_=transcribe(audio,True);words=[w for s in rows for w in s.get("words",[])]
+ rows,_=transcribe(audio,True);words=[w for seg in rows for w in seg.get("words",[])]
  if not words:
   tokens=text.split();dur=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio)]).strip())
   words=[{"word":w,"start":i*dur/max(1,len(tokens)),"end":(i+1)*dur/max(1,len(tokens))} for i,w in enumerate(tokens)]
- blocks=[]
- for i in range(0,len(words),4):
-  group=words[i:i+4];phrase=" ".join(w["word"] for w in group).upper()
-  blocks.append(f"{len(blocks)+1}\n{stamp(group[0]['start'])} --> {stamp(max(group[0]['start']+.2,group[-1]['end']))}\n{phrase}\n")
- path.write_text("\n".join(blocks),encoding="utf-8")
+ def ass_time(seconds):
+  cs=max(0,int(round(float(seconds)*100)))
+  return f"{cs//360000:01}:{(cs//6000)%60:02}:{(cs//100)%60:02}.{cs%100:02}"
+ header="""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1440
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,DejaVu Sans,36,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,60,60,150,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+ lines=[]
+ # Three-word phrases keep captions compact; karaoke fill highlights each spoken word.
+ for i in range(0,len(words),3):
+  group=words[i:i+3]
+  start=float(group[0]["start"]);end=max(start+0.18,float(group[-1]["end"]))
+  pieces=[]
+  for w in group:
+   duration=max(8,int((float(w["end"])-float(w["start"]))*100))
+   token=str(w["word"]).replace("{","(").replace("}",")").upper()
+   pieces.append("{\\kf"+str(duration)+"}"+token)
+  lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{{\\an2\\bord3\\shad1}}"+ " ".join(pieces))
+ path.write_text(header+"\\n".join(lines)+"\\n",encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
- vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=18,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
+ vf="scale=1080:1440:force_original_aspect_ratio=increase,crop=1080:1440,fps=30,tpad=stop_mode=clone:stop_duration=90,subtitles="+str(srt).replace(":","\\:")+":force_style='FontName=DejaVu Sans,FontSize=18,Bold=1,Italic=0,PrimaryColour=&H00FFFFFF,SecondaryColour=&H0000D7FF,OutlineColour=&H00101010,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=115,WrapStyle=2,Spacing=0'"
  cmd=["ffmpeg","-y","-ss",str(start),"-t",str(clip_duration),"-i",str(movie),"-i",str(audio),"-vf",vf]
  if has_source_audio:
   mix="[0:a:0]volume=0.12,aresample=48000[film];[1:a:0]volume=1.0,aresample=48000[voice];[voice][film]amix=inputs=2:duration=first:dropout_transition=1,loudnorm=I=-16:TP=-1.5[aout]"
@@ -337,7 +343,7 @@ async def process(job_id,payload):
    if not narration:continue
    voice=settings.get("voice","en-US-AndrewNeural")
    if settings.get("language")=="Kiswahili" and not voice.startswith("sw-"):voice="sw-KE-RafikiNeural"
-   audio_file=tmp/f"voice_{i:03}.mp3";srt=tmp/f"subs_{i:03}.srt";clip=tmp/f"clip_{i:03}.mp4"
+   audio_file=tmp/f"voice_{i:03}.mp3";srt=tmp/f"subs_{i:03}.ass";clip=tmp/f"clip_{i:03}.mp4"
    await tts(narration,voice,float(settings.get("pace",1)),audio_file)
    subtitles(audio_file,narration,srt)
    voice_seconds=float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(audio_file)]).strip())
