@@ -287,7 +287,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,24,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1
+Style: Default,DejaVu Sans,28,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -422,7 +422,7 @@ async def process(job_id,payload):
     music_index=len(clips[part])
     inputs += ["-stream_loop","-1","-i",str(music_path)]
     fade_out=max(0.0,music_duration-2.0)
-    filters.append(f"[{music_index}:a:0]aresample=48000,volume=0.22,atrim=0:{music_duration:.3f},afade=t=in:st=0:d=1,afade=t=out:st={fade_out:.3f}:d={min(2.0,music_duration):.3f}[music]")
+    filters.append(f"[{music_index}:a:0]aresample=48000,volume=0.40,atrim=0:{music_duration:.3f},afade=t=in:st=0:d=1,afade=t=out:st={fade_out:.3f}:d={min(2.0,music_duration):.3f}[music]")
     filters.append("[aout][music]amix=inputs=2:duration=first:dropout_transition=1:normalize=0,alimiter=limit=0.95[finalaudio]")
     audio_map="[finalaudio]"
     print("AHM_FREE_BACKGROUND_MUSIC",part,music_track,flush=True)
