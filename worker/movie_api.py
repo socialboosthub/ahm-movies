@@ -190,15 +190,15 @@ async def plan_recap(rows,duration,settings):
  evidence=[]
  for i,chunk in enumerate(chunks):
   section_schema={"type":"object","properties":{"summary":{"type":"string"},"events":{"type":"array","items":{"type":"object","properties":{"timestamp":{"type":"number"},"event":{"type":"string"},"characters":{"type":"array","items":{"type":"string"}}},"required":["timestamp","event","characters"],"additionalProperties":False}}},"required":["summary","events"],"additionalProperties":False}
-  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Keep the summary under 70 words and return no more than 3 important timestamped events with character names.\n{chunk}",schema_name="movie_section",schema=section_schema,max_completion_tokens=1100)
+  data=await ask(f"Summarize chronological section {i+1}/{len(chunks)} of this {duration/60:.1f}-minute movie. Preserve names, causes, motives, reveals and ending clues. Do not invent. Keep the summary under 130 words and return up to 7 important timestamped events with character names. Use simple, concrete sentences and preserve the order of events.\n{chunk}",schema_name="movie_section",schema=section_schema,max_completion_tokens=1100)
   # Keep the final synthesis request compact even for feature-length movies.
   compact_events=[]
-  for event in data.get("events",[])[:3]:
-   compact_events.append({"timestamp":event.get("timestamp"),"event":str(event.get("event",""))[:160],"characters":event.get("characters",[])[:5]})
-  evidence.append({"summary":str(data.get("summary",""))[:420],"events":compact_events})
+  for event in data.get("events",[])[:7]:
+   compact_events.append({"timestamp":event.get("timestamp"),"event":str(event.get("event",""))[:240],"characters":event.get("characters",[])[:5]})
+  evidence.append({"summary":str(data.get("summary",""))[:700],"events":compact_events})
  ending_rows=rows[-max(10,min(16,len(rows))):]
  ending_text="\n".join(f"[{x['start']:.1f}-{x['end']:.1f}] {x['text']}" for x in ending_rows)
- prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Target {settings.get('targetMinutes',5.5)} minutes, about 650-800 spoken words, 18-21 narration segments. Return the title FIRST, then the segments, in this exact JSON shape: {{"title":"Movie title","segments":[{{"part":1,"narration":"2 concise natural sentences","source_start":10,"source_end":24,"visual":"short specific visible action","event":"short plot event"}}]}}. Keep visual and event fields brief (under 12 words each); do not repeat narration in them. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; the final segment must select footage from the actual final dialogue or ending sequence, not unrelated end credits. CRITICAL SYNCHRONIZATION RULES: Every segment must be placed at the exact chronological point where its narrated event happens. Use the timestamped transcript events as anchors. The selected source_start/source_end must contain dialogue or evidence for THAT narrated event, not a scene from earlier or later in the story. Do not reuse an earlier timestamp just because it has similar dialogue. Keep segments chronological within each part. If an event's timestamp is uncertain, choose the closest supported transcript timestamp and keep narration general rather than inventing a visual. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
+ prompt=f"""Create a faithful complete movie recap from this evidence covering the WHOLE movie through its actual ending. Use clear everyday English at about a Grade 6-8 reading level. Prefer short, natural spoken sentences. Avoid fancy vocabulary, long sentences, vague dramatic filler and complicated phrasing. Explain what happens, why it happens, and how each event leads to the next. Keep character names and relationships consistent. Never add events, motives, objects or outcomes that are not supported by the evidence. Target {settings.get('targetMinutes',5.5)} minutes, about 650-800 spoken words, 18-21 narration segments. Return the title FIRST, then the segments, in this exact JSON shape: {{"title":"Movie title","segments":[{{"part":1,"narration":"2 concise natural sentences","source_start":10,"source_end":24,"visual":"short specific visible action","event":"short plot event"}}]}}. Keep visual and event fields brief (under 12 words each); do not repeat narration in them. Part 1 is setup and hook; part 2 escalation and turning point; part 3 climax, resolution and complete ending. Divide the story into three naturally balanced episodes, about one third of the narration per part, with meaningful cliffhangers at the end of parts 1 and 2. Do not withhold the ending for suspense. The LAST TWO segments must cover the actual resolution using the final-movie evidence below; the final segment must select footage from the actual final dialogue or ending sequence, not unrelated end credits. CRITICAL SYNCHRONIZATION RULES: Every segment must be placed at the exact chronological point where its narrated event happens. Use the timestamped transcript events as anchors. The selected source_start/source_end must contain dialogue or evidence for THAT narrated event, not a scene from earlier or later in the story. Do not reuse an earlier timestamp just because it has similar dialogue. Keep segments chronological within each part. If an event's timestamp is uncertain, choose the closest supported transcript timestamp and keep narration general rather than inventing a visual. All source times must be grounded in event timestamps, within 0..{duration:.1f}, and windows 5-25 seconds. Each visual must describe footage likely visible at that time. Language: {settings.get('language','English')}. Evidence: {json.dumps(evidence,ensure_ascii=False)}. FINAL MOVIE EVIDENCE (must guide the ending): {ending_text}"""
  recap_schema={"type":"object","properties":{"title":{"type":"string"},"segments":{"type":"array","items":{"type":"object","properties":{"part":{"type":"integer","enum":[1,2,3]},"narration":{"type":"string"},"source_start":{"type":"number"},"source_end":{"type":"number"},"visual":{"type":"string"},"event":{"type":"string"}},"required":["part","narration","source_start","source_end","visual","event"],"additionalProperties":False}}},"required":["title","segments"],"additionalProperties":False}
  def collect_valid(items):
   accepted=[]
@@ -287,7 +287,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,24,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,60,60,115,1
+Style: Default,DejaVu Sans,24,&H00FFFFFF,&H0000D7FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -302,7 +302,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
    duration=max(8,int((float(w["end"])-float(w["start"]))*100))
    token=str(w["word"]).replace("{","(").replace("}",")").upper()
    pieces.append("{\\kf"+str(duration)+"}"+token)
-  lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{{\\an2\\bord3\\shad1}}"+ " ".join(pieces))
+  lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,0,0,0,,{{\\an5\\bord3\\shad1}}"+ " ".join(pieces))
  path.write_text(header+"\n".join(lines)+"\n",encoding="utf-8")
 def render(movie,audio,srt,start,end,out,has_source_audio=True):
  clip_duration=max(1.0,end-start)
@@ -422,7 +422,7 @@ async def process(job_id,payload):
     music_index=len(clips[part])
     inputs += ["-stream_loop","-1","-i",str(music_path)]
     fade_out=max(0.0,music_duration-2.0)
-    filters.append(f"[{music_index}:a:0]aresample=48000,volume=0.13,atrim=0:{music_duration:.3f},afade=t=in:st=0:d=1,afade=t=out:st={fade_out:.3f}:d={min(2.0,music_duration):.3f}[music]")
+    filters.append(f"[{music_index}:a:0]aresample=48000,volume=0.22,atrim=0:{music_duration:.3f},afade=t=in:st=0:d=1,afade=t=out:st={fade_out:.3f}:d={min(2.0,music_duration):.3f}[music]")
     filters.append("[aout][music]amix=inputs=2:duration=first:dropout_transition=1:normalize=0,alimiter=limit=0.95[finalaudio]")
     audio_map="[finalaudio]"
     print("AHM_FREE_BACKGROUND_MUSIC",part,music_track,flush=True)
