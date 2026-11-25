@@ -278,7 +278,7 @@ async def visually_match_scene(movie,scene,duration):
    r=await client.post(os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions",headers={"Authorization":f"Bearer {key}"},json=payload)
   r.raise_for_status()
   raw=r.json()["choices"][0]["message"]["content"]
-  match=re.search(r"\\{.*\\}",raw,re.S)
+  match=re.search(r"\{.*\}",raw,re.S)
   decision=json.loads(match.group(0) if match else raw)
   index=int(decision.get("best",0))
   if index<0 or index>=len(candidates):index=0
@@ -406,7 +406,7 @@ async def process(job_id,payload):
   # Verify every chosen shot against sampled frames near its timestamp. Model errors safely fall back.
   for index,scene in enumerate(recap["segments"]):
    await visually_match_scene(movie,scene,duration)
-   update(job_id,stage=f"Visual matching · scene {index+1}/{len(recap[\u0022segments\u0022])}",progress=42+int((index+1)/len(recap["segments"])*3))
+   update(job_id,stage=f"Visual matching · scene {index+1}/{len(recap[\u0027segments\u0027])}",progress=42+int((index+1)/len(recap["segments"])*3))
   (tmp/"recap_script.json").write_text(json.dumps(recap,ensure_ascii=False,indent=2),encoding="utf-8")
   clips={1:[],2:[],3:[]};clip_durations={1:[],2:[],3:[]};durations={1:0,2:0,3:0};total=len(recap["segments"])
   for i,scene in enumerate(recap["segments"]):
