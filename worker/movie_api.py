@@ -247,6 +247,50 @@ REPAIR REQUIREMENT: The previous attempt did not provide enough usable source ti
   ending["source_end"]=min(duration,ending_start+25)
  return {"title":result.get("title","Movie Recap"),"segments":valid}
 
+async def visually_match_scene(movie,scene,duration):
+ # Verify the planned source clip against real frames using a vision-capable model.
+ # If the vision API is unavailable, preserve the original timestamp and continue.
+ key=os.getenv("GROQ_API_KEY","")
+ if not key:return scene
+ base=float(scene.get("source_start",0))
+ offsets=[0,-10,10,-20,20]
+ candidates=[]
+ for offset in offsets:
+  t=max(0,min(duration-1,base+offset))
+  frame=Path(tempfile.gettempdir())/f"ahm_frame_{uuid.uuid4().hex}.jpg"
+  try:
+   run(["ffmpeg","-y","-ss",str(t),"-i",str(movie),"-frames:v","1","-vf","scale=512:-1","-q:v","5",str(frame)])
+   if frame.exists() and frame.stat().st_size>1000:
+    import base64
+    candidates.append((t,"data:image/jpeg;base64,"+base64.b64encode(frame.read_bytes()).decode("ascii")))
+  except Exception as exc:
+   print("AHM_FRAME_EXTRACTION_FAILED",type(exc).__name__,str(exc)[:160],flush=True)
+  finally:
+   frame.unlink(missing_ok=True)
+ if len(candidates)<2:return scene
+ model=os.getenv("VISION_MODEL","meta-llama/llama-4-scout-17b-16e-instruct")
+ content=[{"type":"text","text":"You are checking movie recap footage. Narration: "+str(scene.get("narration",""))+"\nChoose the candidate frame that best visually illustrates the narration. Prefer visible actions/objects/people directly relevant to the spoken sentence, not merely a similar mood. If none fits, choose 0. Reply ONLY JSON: {\\"best\\": index number, \\"reason\\": short explanation}. Candidate timestamps: "+", ".join(f"{i}={t:.1f}s" for i,(t,_) in enumerate(candidates))}]
+ for _,url in candidates:
+  content.append({"type":"image_url","image_url":{"url":url}})
+ payload={"model":model,"temperature":0,"max_completion_tokens":300,"messages":[{"role":"user","content":content}]}
+ try:
+  async with httpx.AsyncClient(timeout=90) as client:
+   r=await client.post(os.getenv("LLM_BASE_URL","https://api.groq.com/openai/v1").rstrip("/")+"/chat/completions",headers={"Authorization":f"Bearer {key}"},json=payload)
+  r.raise_for_status()
+  raw=r.json()["choices"][0]["message"]["content"]
+  match=re.search(r"\\{.*\\}",raw,re.S)
+  decision=json.loads(match.group(0) if match else raw)
+  index=int(decision.get("best",0))
+  if index<0 or index>=len(candidates):index=0
+  chosen=candidates[index][0]
+  scene["source_start"]=chosen
+  scene["source_end"]=min(duration,chosen+15)
+  scene["visual_check"]=str(decision.get("reason",""))[:200]
+  print("AHM_VISUAL_MATCH",chosen,scene.get("visual_check",""),flush=True)
+ except Exception as exc:
+  print("AHM_VISUAL_MATCH_FALLBACK",type(exc).__name__,str(exc)[:300],flush=True)
+ return scene
+
 def stamp(t):
  ms=max(0,int(t*1000));h=ms//3600000;ms%=3600000;m=ms//60000;ms%=60000;s=ms//1000;ms%=1000
  return f"{h:02}:{m:02}:{s:02},{ms:03}"
@@ -358,6 +402,11 @@ async def process(job_id,payload):
   if len(transcript)<5:raise RuntimeError("Not enough dialogue was detected to analyse the movie.")
   update(job_id,stage="Analysing characters, twists and the ending",progress=36,transcript_segments=len(transcript),detected_language=detected)
   recap=await plan_recap(transcript,duration,settings)
+  update(job_id,stage="Checking narration against original movie frames",progress=42)
+  # Verify every chosen shot against sampled frames near its timestamp. Model errors safely fall back.
+  for index,scene in enumerate(recap["segments"]):
+   await visually_match_scene(movie,scene,duration)
+   update(job_id,stage=f"Visual matching · scene {index+1}/{len(recap[\u0022segments\u0022])}",progress=42+int((index+1)/len(recap["segments"])*3))
   (tmp/"recap_script.json").write_text(json.dumps(recap,ensure_ascii=False,indent=2),encoding="utf-8")
   clips={1:[],2:[],3:[]};clip_durations={1:[],2:[],3:[]};durations={1:0,2:0,3:0};total=len(recap["segments"])
   for i,scene in enumerate(recap["segments"]):
