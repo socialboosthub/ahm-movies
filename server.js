@@ -42,10 +42,13 @@ async function workerRequest(route, options={}) {
     const error = new Error("The movie-processing worker is not connected yet. Configure RECAP_WORKER_URL and RECAP_WORKER_TOKEN.");
     error.statusCode=503; throw error;
   }
+  const timeoutMs=Number(options.timeoutMs)||15000;
+  const fetchOptions={...options};
+  delete fetchOptions.timeoutMs;
   const response = await fetch(new URL(route, process.env.RECAP_WORKER_URL), {
-    ...options,
+    ...fetchOptions,
     headers:{ "content-type":"application/json", "x-ahm-worker-token":process.env.RECAP_WORKER_TOKEN, ...(options.headers||{}) },
-    signal:AbortSignal.timeout(15000)
+    signal:AbortSignal.timeout(timeoutMs)
   });
   const data = await response.json().catch(()=>({}));
   if (!response.ok) {
@@ -60,7 +63,7 @@ app.get("/api/recap/health", async (_req,res) => {
   let worker="not_configured";
   if (workerReady()) {
     try {
-      const probe=await workerRequest("/");
+      const probe=await workerRequest("/",{timeoutMs:40000});
       worker=probe && probe.ok===true ? "connected" : "unhealthy";
     } catch (error) {
       worker="unreachable";
@@ -252,7 +255,7 @@ app.post("/api/recap/jobs", async (req,res) => {
     if (typeof objectKey!=="string"||!objectKey.startsWith("incoming/")) return res.status(400).json({ok:false,error:"Upload the movie before starting its recap."});
     const safeSettings={
       aspectRatio:"3:4",
-      targetMinutes:Math.min(6,Math.max(5,Number(settings?.targetMinutes)||5.5)),
+      targetMinutes:Math.min(3,Math.max(2,Number(settings?.targetMinutes)||3)),
       parts:3,
       voice:String(settings?.voice||"en-US-AndrewNeural").slice(0,80),
       pace:Math.min(1.15,Math.max(0.85,Number(settings?.pace)||1)),
