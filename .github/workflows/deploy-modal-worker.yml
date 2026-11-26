@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ahm-movies-modal-worker-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
     name: Deploy worker
@@ -36,12 +40,12 @@ jobs:
       - name: Verify deployed worker health
         shell: bash
         run: |
-          for attempt in {1..10}; do
-            status=$(curl --silent --show-error --output /tmp/ahm-worker-health.txt --write-out "%{http_code}" https://ashrafsquad001--ahm-movies-worker-fastapi-app.us-east.modal.run/ || true)
-            echo "Modal worker root health HTTP ${status}"
+          for attempt in {1..8}; do
+            status=$(curl --connect-timeout 5 --max-time 15 --silent --show-error --output /tmp/ahm-worker-health.txt --write-out "%{http_code}" https://ashrafsquad001--ahm-movies-worker-fastapi-app.us-east.modal.run/ || true)
+            echo "Modal worker root health attempt ${attempt}/8 · HTTP ${status}"
             cat /tmp/ahm-worker-health.txt || true
             if [ "${status}" = "200" ]; then exit 0; fi
-            sleep 5
+            sleep 3
           done
           echo "Modal worker health endpoint did not return HTTP 200."
           exit 1
