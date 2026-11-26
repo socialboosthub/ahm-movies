@@ -32,19 +32,13 @@ async function checkHealth(){
   if(!storage||!worker){$("startBtn").disabled=true;status("Backend is online. Complete the storage and worker setup before processing a full movie.","warning");}
   else {
    $("startBtn").disabled=true;
-   $("serviceNote").textContent="Checking the upload connection from this browser…";
-   try {
-    await browserUploadCheck();
-    $("serviceNote").textContent="Storage, processing worker and this browser's upload connection are verified.";
-    updateStart();
-   } catch(e) {
-    setConnection("Upload check failed",false);
-    state.uploadTestFailed=true;
-    $("serviceNote").textContent="The small browser connection test timed out. You can still try uploading; the real upload uses resumable chunks and automatic retries.";
-    $("startBtn").textContent="Try upload anyway →";
-    updateStart();
-    status("Connection test timed out. Upload is still available and will retry failed chunks.","warning");
-   }
+   // Do not run a tiny diagnostic PUT from the mobile browser on page load.
+   // Android browsers/network filters can block that test (XHR status 0) even
+   // though the signed multipart upload flow may still work. Let the real upload
+   // attempt determine connectivity and use its retry/reporting logic.
+   state.uploadTestFailed=false;
+   $("serviceNote").textContent="Storage and processing worker are connected. Browser upload will be verified during the real upload.";
+   updateStart();
   }
  }catch(e){setConnection("API unavailable",false);$("serviceNote").textContent=e.message;$("startBtn").disabled=true;}
 }
