@@ -271,7 +271,7 @@ async def visually_match_scene(movie,scene,duration):
    frame.unlink(missing_ok=True)
  if len(candidates)<2:return scene
  model=os.getenv("VISION_MODEL","meta-llama/llama-4-scout-17b-16e-instruct")
- content=[{"type":"text","text":"You are checking movie recap footage. Narration: "+str(scene.get("narration",""))+"\nChoose the candidate frame that best visually illustrates the narration. Prefer visible actions/objects/people directly relevant to the spoken sentence, not merely a similar mood. If none fits, choose 0. Reply ONLY JSON: {\\"best\\": index number, \\"reason\\": short explanation}. Candidate timestamps: "+", ".join(f"{i}={t:.1f}s" for i,(t,_) in enumerate(candidates))}]
+  content=[{"type":"text","text":"You are checking movie recap footage. Narration: "+str(scene.get("narration",""))+"\\nChoose the candidate frame that best visually illustrates the narration. Prefer visible actions/objects/people directly relevant to the spoken sentence, not merely a similar mood. If none fits, choose 0. Reply ONLY JSON with fields best (index number) and reason (short explanation). Candidate timestamps: "+", ".join(f"{i}={t:.1f}s" for i,(t,_) in enumerate(candidates))}]
  for _,url in candidates:
   content.append({"type":"image_url","image_url":{"url":url}})
  payload={"model":model,"temperature":0,"max_completion_tokens":300,"messages":[{"role":"user","content":content}]}
