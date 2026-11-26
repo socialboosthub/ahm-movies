@@ -15,10 +15,27 @@ import modal
 
 WORKER_DIR = Path(__file__).resolve().parent
 
-image = (
+worker_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg", "fonts-dejavu-core", "libgomp1", "espeak-ng")
     .pip_install_from_requirements(str(WORKER_DIR / "requirements.txt"))
+    .add_local_file(
+        str(WORKER_DIR / "movie_api.py"),
+        remote_path="/root/movie_api.py",
+    )
+)
+
+# Keep the API container small and fast to cold-start; heavy movie libraries
+# (Whisper, FFmpeg and Edge TTS) are installed only in the processing image.
+api_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "fastapi==0.115.14",
+        "boto3==1.38.46",
+        "httpx==0.28.1",
+        "requests==2.32.4",
+        "python-multipart==0.0.20",
+    )
     .add_local_file(
         str(WORKER_DIR / "movie_api.py"),
         remote_path="/root/movie_api.py",
@@ -30,7 +47,7 @@ worker_secrets = [modal.Secret.from_name("ahm-movies-secrets")]
 
 
 @app.function(
-    image=image,
+    image=worker_image,
     secrets=worker_secrets,
     cpu=4,
     memory=16384,
@@ -48,10 +65,10 @@ def process_movie(job_id: str, payload: dict):
 
 
 @app.function(
-    image=image,
+    image=api_image,
     secrets=worker_secrets,
     cpu=1,
-    memory=2048,
+    memory=1024,
     timeout=3600,
     scaledown_window=120,
 )
