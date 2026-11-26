@@ -4,7 +4,6 @@ from threading import Lock
 from typing import Any
 import boto3,httpx,requests,edge_tts
 from fastapi import FastAPI,Header,HTTPException
-from faster_whisper import WhisperModel
 
 app=FastAPI(title="AHM Movies Recap Worker",version="1.0.0")
 JOBS:dict[str,dict[str,Any]]={}
@@ -68,7 +67,10 @@ def store():
  )
 def whisper():
  global MODEL
- if MODEL is None:MODEL=WhisperModel(os.getenv("WHISPER_MODEL","small"),device=os.getenv("WHISPER_DEVICE","cpu"),compute_type=os.getenv("WHISPER_COMPUTE_TYPE","int8"))
+ if MODEL is None:
+  # Load the heavy Whisper runtime only when a movie job actually needs transcription.
+  from faster_whisper import WhisperModel
+  MODEL=WhisperModel(os.getenv("WHISPER_MODEL","small"),device=os.getenv("WHISPER_DEVICE","cpu"),compute_type=os.getenv("WHISPER_COMPUTE_TYPE","int8"))
  return MODEL
 def transcribe(path,words=False):
  segments,info=whisper().transcribe(str(path),beam_size=3,vad_filter=True,word_timestamps=words)
