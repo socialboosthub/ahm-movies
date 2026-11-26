@@ -31,6 +31,7 @@ api_image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
         "fastapi==0.115.14",
+        "uvicorn[standard]==0.34.3",
         "boto3==1.38.46",
         "httpx==0.28.1",
         "requests==2.32.4",
