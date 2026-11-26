@@ -523,8 +523,12 @@ async def create(payload:dict,x_ahm_worker_token:str|None=Header(default=None)):
  if dispatcher is not None:
   try:dispatcher(jid,payload)
   except Exception as exc:
-   update(jid,status="failed",stage="Could not queue processing job",error=str(exc)[:800])
-   raise HTTPException(503,"The movie processing queue is temporarily unavailable.")
+   print("AHM_JOB_DISPATCH_FAILURE",jid,type(exc).__name__,str(exc)[:1500],flush=True)
+   try:
+    update(jid,status="failed",stage="Could not queue processing job",error=type(exc).__name__+": "+str(exc)[:800])
+   except Exception as persist_exc:
+    print("AHM_JOB_FAILURE_STATUS_WRITE_ERROR",jid,type(persist_exc).__name__,str(persist_exc)[:600],flush=True)
+   raise HTTPException(503,"Job dispatch failed: "+type(exc).__name__+": "+str(exc)[:500])
  else:
   # Local-development fallback only. Modal deployments always use a separate durable function.
   asyncio.create_task(process(jid,payload))
