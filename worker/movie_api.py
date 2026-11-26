@@ -407,9 +407,9 @@ async def process(job_id,payload):
   recap=await plan_recap(transcript,duration,settings)
   update(job_id,stage="Checking narration against original movie frames",progress=42)
   # Verify every chosen shot against sampled frames near its timestamp. Model errors safely fall back.
-  for index,scene in enumerate(recap["segments"]):
+  total_visual_scenes=len(recap["segments"])\n  for index,scene in enumerate(recap["segments"]):
    await visually_match_scene(movie,scene,duration)
-   update(job_id,stage=f"Visual matching · scene {index+1}/{len(recap[\u0027segments\u0027])}",progress=42+int((index+1)/len(recap["segments"])*3))
+   update(job_id,stage=f"Visual matching · scene {index+1}/{total_visual_scenes}",progress=42+int((index+1)/total_visual_scenes*3))
   (tmp/"recap_script.json").write_text(json.dumps(recap,ensure_ascii=False,indent=2),encoding="utf-8")
   clips={1:[],2:[],3:[]};clip_durations={1:[],2:[],3:[]};durations={1:0,2:0,3:0};total=len(recap["segments"])
   for i,scene in enumerate(recap["segments"]):
