@@ -1,7 +1,6 @@
 # Health verification enabled in the deployment workflow.
 # Redeploy marker: refresh Modal containers after R2 secret rotation.
 # Redeploy marker: restart worker after recap visual-matching pipeline changes.
-# Redeploy after correcting R2_ACCOUNT_ID in ahm-movies-secrets.
 # Redeploy to expose complete worker-side processing errors in Modal logs.
 """Modal deployment for AHM Movies.
 
@@ -69,17 +68,46 @@ def process_movie(job_id: str, payload: dict):
     image=api_image,
     secrets=worker_secrets,
     cpu=1,
-    memory=1024,
+    memory=2048,
     timeout=3600,
+    startup_timeout=300,
     scaledown_window=120,
 )
 @modal.concurrent(max_inputs=20)
 @modal.asgi_app()
 def fastapi_app():
-    from movie_api import app as api
+    # Keep a tiny health responder independent from movie_api imports. The previous
+    # health checks hung while the API container initialized, so this dispatcher
+    # loads the full routes only when an actual API path is requested.
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
 
-    # Modal's .spawn() creates an independent function call for every movie.
-    # Resolve the Modal Function handle only when a job is actually submitted;
-    # keeping API startup independent makes health checks fast and reliable.
-    api.state.dispatch_job = lambda job_id, payload: process_movie.spawn(job_id, payload)
-    return api
+    health_app = FastAPI(title="AHM Movies Worker Health")
+
+    @health_app.get("/")
+    @health_app.get("/health")
+    async def health():
+        required = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "RECAP_WORKER_TOKEN"]
+        configured = all(__import__("os").getenv(key, "").strip() for key in required)
+        return JSONResponse({
+            "ok": configured,
+            "service": "ahm-movies-worker",
+            "storage_configured": all(__import__("os").getenv(key, "").strip() for key in required[:4]),
+            "worker_token_configured": bool(__import__("os").getenv("RECAP_WORKER_TOKEN", "").strip()),
+            "llm_configured": bool(__import__("os").getenv("GROQ_API_KEY", "").strip()),
+        }, status_code=200 if configured else 503)
+
+    api_holder = {"app": None}
+
+    async def dispatch(scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") in ("/", "/health"):
+            await health_app(scope, receive, send)
+            return
+        if api_holder["app"] is None:
+            from movie_api import app as api
+            api.state.dispatch_job = lambda job_id, payload: process_movie.spawn(job_id, payload)
+            api_holder["app"] = api
+            print("AHM_API_LAZY_IMPORT_READY", flush=True)
+        await api_holder["app"](scope, receive, send)
+
+    return dispatch
