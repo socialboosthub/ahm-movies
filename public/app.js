@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 const $=id=>document.getElementById(id);
-const state={file:null,objectKey:null,jobId:null,uploading:false,polling:false,previewUrl:null};
+const state={file:null,objectKey:null,jobId:null,uploading:false,polling:false,previewUrl:null,uploadTestFailed:false};
 const allowed=new Set(["video/mp4","video/quicktime","video/x-matroska","video/webm","video/mpeg"]);
 const bytes=n=>n<1024**3?(n/1024**2).toFixed(1)+" MB":(n/1024**3).toFixed(2)+" GB";
 function status(message,type=""){$("jobStatus").textContent=message;$("jobStatus").className="job-status "+type;}
@@ -11,7 +11,7 @@ async function browserUploadCheck(){
  const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
  const report=(result,message="")=>api("/api/recap/browser-test/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({result,message,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
  try{
-  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(256*1024)],{type:"video/mp4"}),"video/mp4",null,25000);
+  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(32*1024)],{type:"video/mp4"}),"video/mp4",null,45000);
   const etag=xhr.getResponseHeader("ETag");
   if(!etag)throw new Error("R2 did not expose the ETag needed to finish multipart uploads.");
   await api("/api/recap/browser-test/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId,etag})});
@@ -39,14 +39,16 @@ async function checkHealth(){
     updateStart();
    } catch(e) {
     setConnection("Upload check failed",false);
-    $("serviceNote").textContent=e.message;
-    $("startBtn").disabled=true;
-    status("Browser upload connection could not be verified.","error");
+    state.uploadTestFailed=true;
+    $("serviceNote").textContent="The small browser connection test timed out. You can still try uploading; the real upload uses resumable chunks and automatic retries.";
+    $("startBtn").textContent="Try upload anyway →";
+    updateStart();
+    status("Connection test timed out. Upload is still available and will retry failed chunks.","warning");
    }
   }
  }catch(e){setConnection("API unavailable",false);$("serviceNote").textContent=e.message;$("startBtn").disabled=true;}
 }
-function updateStart(){$("startBtn").disabled=!state.file||state.uploading||state.polling;}
+function updateStart(){$("startBtn").disabled=!state.file||state.uploading||state.polling;if(state.uploadTestFailed&&!state.uploading&&!state.polling){$("startBtn").textContent="Try upload anyway →";}}
 function selectFile(file){
  if(!file)return;
  if(!allowed.has(file.type)){status("Unsupported file type. Choose MP4, MOV, MKV, WebM or MPEG.","error");return;}
