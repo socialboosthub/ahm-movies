@@ -11,7 +11,7 @@ async function browserUploadCheck(){
  const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
  const report=(result,message="")=>api("/api/recap/browser-test/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({result,message,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
  try{
-  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(8*1024*1024)],{type:"video/mp4"}),"video/mp4",null,90000);
+  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(256*1024)],{type:"video/mp4"}),"video/mp4",null,25000);
   const etag=xhr.getResponseHeader("ETag");
   if(!etag)throw new Error("R2 did not expose the ETag needed to finish multipart uploads.");
   await api("/api/recap/browser-test/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId,etag})});
