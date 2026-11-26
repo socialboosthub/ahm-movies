@@ -72,6 +72,7 @@ def process_movie(job_id: str, payload: dict):
     timeout=3600,
     scaledown_window=120,
 )
+@modal.concurrent(max_inputs=20)
 @modal.asgi_app()
 def fastapi_app():
     from movie_api import app as api
