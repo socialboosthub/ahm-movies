@@ -1,5 +1,6 @@
 # Health verification enabled in the deployment workflow.
 # Redeploy marker: refresh Modal containers after R2 secret rotation.
+# Redeploy marker: restart worker after recap visual-matching pipeline changes.
 # Redeploy after correcting R2_ACCOUNT_ID in ahm-movies-secrets.
 # Redeploy to expose complete worker-side processing errors in Modal logs.
 """Modal deployment for AHM Movies.
