@@ -2,7 +2,7 @@ import os,re,json,time,uuid,asyncio,subprocess,tempfile,shutil,traceback
 from pathlib import Path
 from threading import Lock
 from typing import Any
-import boto3,httpx,requests,edge_tts
+import boto3,httpx,requests
 from fastapi import FastAPI,Header,HTTPException
 
 app=FastAPI(title="AHM Movies Recap Worker",version="1.0.0")
@@ -305,6 +305,7 @@ async def tts(text,voice,pace,path):
  for attempt in range(5):
   try:
    if path.exists():path.unlink()
+   import edge_tts
    await edge_tts.Communicate(text,voice=requested,rate=rate).save(str(path))
    if path.exists() and path.stat().st_size>1024:
     print("AHM_TTS_SUCCESS",requested,"attempt",attempt+1,flush=True)
