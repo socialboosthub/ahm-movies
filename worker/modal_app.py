@@ -10,6 +10,7 @@ on the lifetime of an HTTP response or FastAPI BackgroundTasks.
 """
 from pathlib import Path
 import asyncio
+import traceback
 import modal
 
 WORKER_DIR = Path(__file__).resolve().parent
@@ -104,10 +105,18 @@ def fastapi_app():
             await health_app(scope, receive, send)
             return
         if api_holder["app"] is None:
-            from movie_api import app as api
-            api.state.dispatch_job = lambda job_id, payload: process_movie.spawn(job_id, payload)
-            api_holder["app"] = api
-            print("AHM_API_LAZY_IMPORT_READY", flush=True)
+            try:
+                from movie_api import app as api
+                api.state.dispatch_job = lambda job_id, payload: process_movie.spawn(job_id, payload)
+                api_holder["app"] = api
+                print("AHM_API_LAZY_IMPORT_READY", flush=True)
+            except Exception as exc:
+                print("AHM_API_LAZY_IMPORT_FAILED", type(exc).__name__, str(exc)[:1500], flush=True)
+                traceback.print_exc()
+                from fastapi.responses import JSONResponse
+                response = JSONResponse({"ok": False, "error": "Worker API initialization failed", "detail": f"{type(exc).__name__}: {str(exc)[:1000]}"}, status_code=503)
+                await response(scope, receive, send)
+                return
         await api_holder["app"](scope, receive, send)
 
     return dispatch
