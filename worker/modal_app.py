@@ -78,5 +78,7 @@ def fastapi_app():
     from movie_api import app as api
 
     # Modal's .spawn() creates an independent function call for every movie.
-    api.state.dispatch_job = process_movie.spawn
+    # Resolve the Modal Function handle only when a job is actually submitted;
+    # keeping API startup independent makes health checks fast and reliable.
+    api.state.dispatch_job = lambda job_id, payload: process_movie.spawn(job_id, payload)
     return api
