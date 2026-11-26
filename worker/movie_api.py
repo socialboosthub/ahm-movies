@@ -514,7 +514,11 @@ async def create(payload:dict,x_ahm_worker_token:str|None=Header(default=None)):
  jid=uuid.uuid4().hex
  job={"id":jid,"status":"queued","stage":"Waiting for worker","progress":0,"created_at":time.time()}
  with LOCK:JOBS[jid]=job
- save_job(jid,job)
+ try:
+  save_job(jid,job)
+ except Exception as exc:
+  print("AHM_JOB_CREATE_R2_FAILURE",jid,type(exc).__name__,str(exc)[:1200],flush=True)
+  raise HTTPException(503,f"Job could not be saved to persistent storage: {type(exc).__name__}: {str(exc)[:500]}")
  dispatcher=getattr(app.state,"dispatch_job",None)
  if dispatcher is not None:
   try:dispatcher(jid,payload)
