@@ -13,3 +13,5 @@ label{display:block;margin:12px 0 6px;color:#e1e5ee;font-size:12px;font-weight:7
 @media(max-width:620px){.settings-grid{grid-template-columns:1fr}.action-panel{grid-template-columns:1fr}.action-panel button{width:100%}.episode{flex-wrap:wrap}.episode p{width:100%;order:2}.episode .download{margin-left:auto}}
 
 .connection-test{display:block;width:100%;margin:12px 0 0;padding:12px 14px;border:1px solid #3b4352;border-radius:12px;background:#171c25;color:#dfe6f1;font:inherit;font-weight:600}.connection-test:disabled{opacity:.65}.connection-test-result{margin:8px 0 0;font-size:13px;color:#aab4c5;line-height:1.5}.connection-test-result.success{color:#61d7a1}.connection-test-result.error{color:#ff8c8c}
+
+.segment-panel{border-color:rgba(88,160,255,.28)}.segment-drop{margin-top:8px}.segment-start{display:block;width:100%;margin-top:14px;padding:14px 18px;border:0;border-radius:12px;background:#3478f6;color:#fff;font-weight:700;font-size:1rem}.segment-start:disabled{opacity:.45;cursor:not-allowed}.segment-status{font-size:.9rem;color:#9eb0c6;line-height:1.5;margin:10px 0 0;overflow-wrap:anywhere}
