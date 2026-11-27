@@ -8,22 +8,24 @@ function status(message,type=""){$("jobStatus").textContent=message;$("jobStatus
 function setConnection(label,ok){$("connection").textContent=label;$("connection").className="status-pill "+(ok?"online":"offline");}
 async function api(url,options={}){const r=await fetch(url,options);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Request failed ("+r.status+")");return d;}
 async function browserUploadCheck(){
- const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:"ahm-connection-test.mp4",contentType:"video/mp4",size:32*1024})});
- const blob=new Blob([new Uint8Array(32*1024)],{type:"video/mp4"});
- let completed=false;
- try{
-  const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber:1})});
-  const xhr=await xhrPut(signed.uploadUrl,blob,"video/mp4",null,45000);
-  const etag=xhr.getResponseHeader("ETag");
-  if(!etag)throw new Error("Multipart test part did not expose an ETag.");
-  await api("/api/recap/multipart/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,parts:[{PartNumber:1,ETag:etag,Size:blob.size}]})});
-  completed=true;
-  await api("/api/recap/multipart/test-cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey})});
- }catch(e){
-  await api("/api/recap/multipart/abort",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId})}).catch(()=>{});
-  throw e;
+ const sizes=[32*1024,1024*1024,5*1024*1024];
+ for(const size of sizes){
+  const label=size===32*1024?"32 KB":size===1024*1024?"1 MB":"5 MB";
+  const filename="ahm-connection-test-"+size+".mp4";
+  const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename,contentType:"video/mp4",size})});
+  const blob=new Blob([new Uint8Array(size)],{type:"video/mp4"});
+  try{
+   const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber:1})});
+   const xhr=await xhrPut(signed.uploadUrl,blob,"video/mp4",null,180000);
+   const etag=xhr.getResponseHeader("ETag");
+   if(!etag)throw new Error(label+" test: ETag not exposed.");
+   await api("/api/recap/multipart/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,parts:[{PartNumber:1,ETag:etag,Size:blob.size}]})});
+   await api("/api/recap/multipart/test-cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey})});
+  }catch(e){
+   await api("/api/recap/multipart/abort",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId})}).catch(()=>{});
+   throw new Error(label+" multipart upload failed: "+e.message);
+  }
  }
- if(!completed)throw new Error("Multipart test did not complete.");
 }
 async function checkHealth(){
  try{
@@ -90,7 +92,7 @@ async function multipartUpload(file){
    $("uploadLabel").textContent="Resuming saved upload · "+session.parts.length+" parts already uploaded";
   }else{
    const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
-   session={file,objectKey:created.objectKey,uploadId:created.uploadId,partSize:Number(created.partSize)||8*1024*1024,parts:[],uploadedBytes:0};
+   session={file,objectKey:created.objectKey,uploadId:created.uploadId,partSize:Number(created.partSize)||5*1024*1024,parts:[],uploadedBytes:0};
    state.multipartSession=session;
    try{localStorage.setItem(resumeKey,JSON.stringify({file:identity,objectKey:session.objectKey,uploadId:session.uploadId,partSize:session.partSize,parts:session.parts,uploadedBytes:0}));}catch{}
   }
@@ -224,10 +226,10 @@ function startDownload(url,filename){
 $("startBtn").addEventListener("click",startJob);
 $("connectionTestBtn").addEventListener("click",async()=>{
  const btn=$("connectionTestBtn"),result=$("connectionTestResult");
- btn.disabled=true;btn.textContent="Testing connection…";result.textContent="Testing full multipart upload with only 32 KB: create, signed part, ETag, and complete. No movie upload.";
+ btn.disabled=true;btn.textContent="Testing connection…";result.textContent="Testing multipart uploads at 32 KB, 1 MB, and 5 MB. No movie upload.";
  try{
   await browserUploadCheck();
-  result.textContent="PASS: Full multipart test succeeded (create → signed part upload → ETag → complete). Your movie was not uploaded.";
+  result.textContent="PASS: 32 KB, 1 MB, and 5 MB multipart uploads all succeeded. Your movie was not uploaded.";
   result.className="connection-test-result success";
  }catch(e){
   result.textContent="FAIL: "+e.message+" This is a small connection test only; your movie was not uploaded.";
