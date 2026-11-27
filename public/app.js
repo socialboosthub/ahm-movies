@@ -109,7 +109,7 @@ async function multipartUpload(file){
     try{
      await multipartReport({stage:"part-start",part:partNumber,total:count,attempt,size:blob.size});
      const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey,uploadId,partNumber})});
-     result=await xhrPut(signed.uploadUrl,blob,file.type,e=>{
+     result=await xhrPut(signed.uploadUrl,new Blob([blob],{type:""}),null,e=>{
       if(e.lengthComputable){
        const bytesDone=session.uploadedBytes+e.loaded;
        const pct=Math.round(bytesDone/file.size*100);
