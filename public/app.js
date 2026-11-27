@@ -90,7 +90,7 @@ async function multipartUpload(file){
    $("uploadLabel").textContent="Resuming saved upload · "+session.parts.length+" parts already uploaded";
   }else{
    const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
-   session={file,objectKey:created.objectKey,uploadId:created.uploadId,partSize:Number(created.partSize)||16*1024*1024,parts:[],uploadedBytes:0};
+   session={file,objectKey:created.objectKey,uploadId:created.uploadId,partSize:Number(created.partSize)||8*1024*1024,parts:[],uploadedBytes:0};
    state.multipartSession=session;
    try{localStorage.setItem(resumeKey,JSON.stringify({file:identity,objectKey:session.objectKey,uploadId:session.uploadId,partSize:session.partSize,parts:session.parts,uploadedBytes:0}));}catch{}
   }
@@ -114,7 +114,7 @@ async function multipartUpload(file){
        $("uploadBar").style.width=pct+"%";
        $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
-     },5*60*1000);
+     },15*60*1000);
      await multipartReport({stage:"part-success",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted});
     }catch(error){
      lastError=error;
@@ -224,10 +224,10 @@ function startDownload(url,filename){
 $("startBtn").addEventListener("click",startJob);
 $("connectionTestBtn").addEventListener("click",async()=>{
  const btn=$("connectionTestBtn"),result=$("connectionTestResult");
- btn.disabled=true;btn.textContent="Testing connection…";result.textContent="Checking the signed R2 upload and ETag access using a tiny 32 KB test file.";
+ btn.disabled=true;btn.textContent="Testing connection…";result.textContent="Testing full multipart upload with only 32 KB: create, signed part, ETag, and complete. No movie upload.";
  try{
   await browserUploadCheck();
-  result.textContent="PASS: This browser can upload to R2 and read the ETag. The movie-upload failure is likely elsewhere in the multipart flow.";
+  result.textContent="PASS: Full multipart test succeeded (create → signed part upload → ETag → complete). Your movie was not uploaded.";
   result.className="connection-test-result success";
  }catch(e){
   result.textContent="FAIL: "+e.message+" This is a small connection test only; your movie was not uploaded.";
