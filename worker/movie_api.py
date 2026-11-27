@@ -82,9 +82,25 @@ def transcribe(path,words=False):
  return out,info.language
 async def transcribe_movie(path,duration,job_id):
  key=os.getenv("GROQ_API_KEY","")
- if not key or os.getenv("TRANSCRIBE_PROVIDER","groq").lower()=="local":
-  return transcribe(path)
  chunk_seconds=600
+ async def local_chunked():
+  chunk_dir=path.parent/"local-whisper-chunks";chunk_dir.mkdir(parents=True,exist_ok=True)
+  local_rows=[];language="unknown"
+  starts=list(range(0,int(duration),chunk_seconds)) or [0]
+  for index,start in enumerate(starts):
+   chunk=chunk_dir/f"local_{index:03}.wav"
+   length=min(chunk_seconds,duration-start)
+   run(["ffmpeg","-y","-ss",str(start),"-t",str(length),"-i",str(path),"-vn","-ac","1","-ar","16000","-c:a","pcm_s16le",str(chunk)])
+   rows,detected=await asyncio.to_thread(transcribe,chunk)
+   if detected:language=detected
+   for row in rows:
+    a=max(0.0,start+float(row["start"]));b=min(duration,start+float(row["end"]))
+    if b>a:local_rows.append({"start":a,"end":b,"text":row["text"]})
+   update(job_id,stage=f"Local Whisper · audio section {index+1}/{len(starts)}",progress=12+int((index+1)/len(starts)*20))
+  local_rows.sort(key=lambda item:item["start"])
+  return local_rows,language
+ if not key or os.getenv("TRANSCRIBE_PROVIDER","groq").lower()=="local":
+  return await local_chunked()
  starts=list(range(0,int(duration),chunk_seconds))
  if not starts:starts=[0]
  chunk_dir=path.parent/"groq-audio-chunks";chunk_dir.mkdir(parents=True,exist_ok=True)
@@ -128,7 +144,7 @@ async def transcribe_movie(path,duration,job_id):
   print("GROQ_TRANSCRIPTION_FALLBACK",job_id,type(error).__name__,str(error)[:1200],flush=True)
   traceback.print_exc()
   update(job_id,stage="Using local Whisper transcription",progress=12)
-  return transcribe(path)
+  return await local_chunked()
 async def ask(prompt,system="You are a faithful movie-story analyst. Never invent events.",schema_name="movie_section",schema=None,max_completion_tokens=2048):
  key=os.getenv("GROQ_API_KEY")
  if not key:raise RuntimeError("GROQ_API_KEY is missing from the worker environment.")
