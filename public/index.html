@@ -12,7 +12,7 @@
 
   <section class="panel">
     <div class="section-title"><span class="step">01</span><div><h2>Upload your full movie</h2><p>MP4, MOV, MKV, WebM · up to 4.5 GB · uploads directly to secure object storage.</p></div></div>
-    <label class="dropzone" id="dropzone" for="movieFile"><input id="movieFile" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/mpeg"><span class="upload-symbol">↑</span><strong id="fileTitle">Choose your movie</strong><span id="fileMeta">Tap to browse your phone or computer</span><span class="browse">Browse files</span></label>
+    <label class="dropzone" id="dropzone" for="movieFile"><input id="movieFile" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/mpeg"><span class="upload-symbol">↑</span><strong id="fileTitle">Choose your movie</strong><span id="fileMeta">Tap to browse your phone or computer</span><span class="browse">Browse files</span></label><button type="button" id="connectionTestBtn" class="connection-test">Test upload connection (small test)</button><p id="connectionTestResult" class="connection-test-result" role="status">This test uploads only a tiny 32 KB diagnostic file—not your movie.</p>
     <div id="uploadProgress" class="progress-wrap" hidden><div class="progress-track"><i id="uploadBar"></i></div><small id="uploadLabel">Preparing upload…</small></div>
     <video id="moviePreview" controls playsinline hidden></video>
   </section>
