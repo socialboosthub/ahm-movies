@@ -16,7 +16,7 @@ async function browserUploadCheck(){
   const blob=new Blob([new Uint8Array(size)],{type:"video/mp4"});
   try{
    const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber:1})});
-   const xhr=await xhrPut(signed.uploadUrl,blob,"video/mp4",null,180000);
+   const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(size)]),null,null,180000);
    const etag=xhr.getResponseHeader("ETag");
    if(!etag)throw new Error(label+" test: ETag not exposed.");
    await api("/api/recap/multipart/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,parts:[{PartNumber:1,ETag:etag,Size:blob.size}]})});
