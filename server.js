@@ -263,8 +263,9 @@ app.post("/api/recap/uploads", async (req,res) => {
 
 app.post("/api/recap/jobs", async (req,res) => {
   try {
-    const {objectKey,filename,settings}=req.body||{};
-    if (typeof objectKey!=="string"||!objectKey.startsWith("incoming/")) return res.status(400).json({ok:false,error:"Upload the movie before starting its recap."});
+    const {objectKey,segmentKeys,filename,settings}=req.body||{};
+    const isSegments=Array.isArray(segmentKeys)&&segmentKeys.length>=2&&segmentKeys.length<=24&&segmentKeys.every(k=>typeof k==="string"&&k.startsWith("incoming/"));
+    if (!isSegments&&(typeof objectKey!=="string"||!objectKey.startsWith("incoming/"))) return res.status(400).json({ok:false,error:"Upload the movie or all movie sections before starting its recap."});
     const safeSettings={
       aspectRatio:"3:4",
       targetMinutes:Math.min(3,Math.max(2,Number(settings?.targetMinutes)||3)),
@@ -275,7 +276,7 @@ app.post("/api/recap/jobs", async (req,res) => {
       subtitlePosition:"lower-middle",
       language:String(settings?.language||"English").slice(0,40)
     };
-    const job=await workerRequest("/jobs",{method:"POST",body:JSON.stringify({object_key:objectKey,filename:clean(filename),settings:safeSettings})});
+    const job=await workerRequest("/jobs",{method:"POST",body:JSON.stringify(isSegments?{segment_keys:segmentKeys,filename:clean(filename),settings:safeSettings}:{object_key:objectKey,filename:clean(filename),settings:safeSettings})});
     res.status(202).json({ok:true,...job});
   } catch(error) {
     console.error("job start failed",error.message);
