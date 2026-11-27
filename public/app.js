@@ -76,11 +76,22 @@ async function multipartReport(data){
  return api("/api/recap/multipart/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...data,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
 }
 async function multipartUpload(file){
+ const resumeKey="ahm_movies_multipart_resume_v1";
+ const identity={name:file.name,size:file.size,lastModified:file.lastModified||0};
  let session=state.multipartSession;
  if(!session||session.file!==file){
-  const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
-  session={file,objectKey:created.objectKey,uploadId:created.uploadId,partSize:Number(created.partSize)||5*1024*1024,parts:[],uploadedBytes:0};
-  state.multipartSession=session;
+  let saved=null;
+  try{saved=JSON.parse(localStorage.getItem(resumeKey)||"null");}catch{}
+  if(saved&&saved.file&&saved.file.name===identity.name&&saved.file.size===identity.size&&saved.file.lastModified===identity.lastModified&&saved.objectKey&&saved.uploadId&&Array.isArray(saved.parts)){
+   session={...saved,file,uploadedBytes:saved.parts.reduce((sum,p)=>sum+Number(p.Size||0),0)};
+   state.multipartSession=session;
+   $("uploadLabel").textContent="Resuming saved upload · "+session.parts.length+" parts already uploaded";
+  }else{
+   const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type,size:file.size})});
+   session={file,objectKey:created.objectKey,uploadId:created.uploadId,partSize:Number(created.partSize)||16*1024*1024,parts:[],uploadedBytes:0};
+   state.multipartSession=session;
+   try{localStorage.setItem(resumeKey,JSON.stringify({file:identity,objectKey:session.objectKey,uploadId:session.uploadId,partSize:session.partSize,parts:session.parts,uploadedBytes:0}));}catch{}
+  }
  }
  const {objectKey,uploadId,partSize,parts}=session;
  const count=Math.ceil(file.size/partSize);
@@ -101,7 +112,7 @@ async function multipartUpload(file){
        $("uploadBar").style.width=pct+"%";
        $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
-     },120*1000);
+     },5*60*1000);
      await multipartReport({stage:"part-success",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted});
     }catch(error){
      lastError=error;
@@ -116,14 +127,16 @@ async function multipartUpload(file){
    if(!result)throw lastError||new Error("Part "+partNumber+" failed after 6 attempts. Completed parts are saved in this upload session—tap Upload & create recap to resume.");
    const etag=result.getResponseHeader("ETag");
    if(!etag)throw new Error("R2 did not expose the ETag for upload part "+partNumber+".");
-   parts.push({PartNumber:partNumber,ETag:etag});
+   parts.push({PartNumber:partNumber,ETag:etag,Size:blob.size});
    session.uploadedBytes+=blob.size;
+   try{localStorage.setItem(resumeKey,JSON.stringify({file:identity,objectKey,uploadId,partSize,parts,uploadedBytes:session.uploadedBytes}));}catch{}
    $("uploadBar").style.width=Math.round(session.uploadedBytes/file.size*100)+"%";
    $("uploadLabel").textContent="Uploaded part "+partNumber+"/"+count+" · saved";
   }
   await api("/api/recap/multipart/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey,uploadId,parts})});
   state.objectKey=objectKey;
   state.multipartSession=null;
+  try{localStorage.removeItem(resumeKey);}catch{}
  }catch(error){
   // Keep the R2 multipart upload and completed parts alive so the next user retry
   // can resume from the first missing part instead of re-uploading the whole movie.
