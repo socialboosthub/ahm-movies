@@ -8,20 +8,22 @@ function status(message,type=""){$("jobStatus").textContent=message;$("jobStatus
 function setConnection(label,ok){$("connection").textContent=label;$("connection").className="status-pill "+(ok?"online":"offline");}
 async function api(url,options={}){const r=await fetch(url,options);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Request failed ("+r.status+")");return d;}
 async function browserUploadCheck(){
- const signed=await api("/api/recap/browser-test",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
- const report=(result,message="")=>api("/api/recap/browser-test/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({result,message,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
+ const created=await api("/api/recap/multipart/create",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({filename:"ahm-connection-test.mp4",contentType:"video/mp4",size:32*1024})});
+ const blob=new Blob([new Uint8Array(32*1024)],{type:"video/mp4"});
+ let completed=false;
  try{
-  const xhr=await xhrPut(signed.uploadUrl,new Blob([new Uint8Array(32*1024)],{type:"video/mp4"}),"video/mp4",null,45000);
+  const signed=await api("/api/recap/multipart/part-url",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,partNumber:1})});
+  const xhr=await xhrPut(signed.uploadUrl,blob,"video/mp4",null,45000);
   const etag=xhr.getResponseHeader("ETag");
-  if(!etag)throw new Error("R2 did not expose the ETag needed to finish multipart uploads.");
-  await api("/api/recap/browser-test/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId,etag})});
-  await report("passed");
- } catch(e) {
-  await report("failed",e.message);
+  if(!etag)throw new Error("Multipart test part did not expose an ETag.");
+  await api("/api/recap/multipart/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId,parts:[{PartNumber:1,ETag:etag,Size:blob.size}]})});
+  completed=true;
+  await api("/api/recap/multipart/test-cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey})});
+ }catch(e){
+  await api("/api/recap/multipart/abort",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:created.objectKey,uploadId:created.uploadId})}).catch(()=>{});
   throw e;
- } finally {
-  await api("/api/recap/browser-test/cleanup",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({objectKey:signed.objectKey,uploadId:signed.uploadId})}).catch(()=>{});
  }
+ if(!completed)throw new Error("Multipart test did not complete.");
 }
 async function checkHealth(){
  try{
