@@ -234,19 +234,27 @@ $("segmentFiles").addEventListener("change",e=>{
 $("segmentStartBtn").addEventListener("click",async()=>{
  if(state.uploading||state.polling||state.segments.length<2)return;
  state.uploading=true;$("segmentStartBtn").disabled=true;state.multipartSession=null;
- const keys=[];
+ const identities=state.segments.map(f=>({name:f.name,size:f.size,lastModified:f.lastModified||0}));
+ const manifestKey="ahm_movie_segment_manifest_v1_"+identities.map(f=>encodeURIComponent(f.name)+":"+f.size+":"+f.lastModified).join("|");
+ let manifest={identities,keys:[]};
+ try{const saved=JSON.parse(localStorage.getItem(manifestKey)||"null");if(saved&&JSON.stringify(saved.identities)===JSON.stringify(identities)&&Array.isArray(saved.keys))manifest=saved;}catch{}
+ const keys=manifest.keys;
  try{
   $("uploadProgress").hidden=false;
   for(let i=0;i<state.segments.length;i++){
-   const file=state.segments[i];state.file=file;state.multipartSession=null;
+   const file=state.segments[i];state.file=file;
+   if(keys[i]){$("segmentStatus").textContent="Section "+(i+1)+" already uploaded · skipping";continue;}
+   state.multipartSession=null;
    $("uploadLabel").textContent="Uploading section "+(i+1)+"/"+state.segments.length+" · "+file.name;
    $("segmentStatus").textContent="Uploading section "+(i+1)+" of "+state.segments.length+" ("+file.name+")";
-   await multipartUpload(file);keys.push(state.objectKey);state.objectKey=null;
+   await multipartUpload(file);keys[i]=state.objectKey;state.objectKey=null;
+   try{localStorage.setItem(manifestKey,JSON.stringify({identities,keys}));}catch{}
   }
   const settings={targetMinutes:Number($("length").value),language:$("language").value,voice:$("voice").value,pace:Number($("pace").value)};
   const cleanName=state.segments[0].name.replace(/[_-]?\d+\.[^.]+$/,"")||"Split movie";
   const job=await api("/api/recap/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({segmentKeys:keys,filename:cleanName,settings})});
   state.jobId=job.id||job.job_id;state.uploading=false;state.polling=true;
+  try{localStorage.removeItem(manifestKey);}catch{}
   $("segmentStatus").textContent="All sections uploaded. Worker is joining them into the full movie.";
   status("Movie sections accepted. Full-film analysis has started.","success");await poll();
  }catch(err){
