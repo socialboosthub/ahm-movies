@@ -1,7 +1,7 @@
 (() => {
 "use strict";
 const $=id=>document.getElementById(id);
-const state={file:null,objectKey:null,jobId:null,uploading:false,polling:false,previewUrl:null,uploadTestFailed:false,multipartSession:null};
+const state={file:null,objectKey:null,jobId:null,uploading:false,polling:false,previewUrl:null,uploadTestFailed:false,multipartSession:null,segments:[]};
 const allowed=new Set(["video/mp4","video/quicktime","video/x-matroska","video/webm","video/mpeg"]);
 const bytes=n=>n<1024**3?(n/1024**2).toFixed(1)+" MB":(n/1024**3).toFixed(2)+" GB";
 function status(message,type=""){$("jobStatus").textContent=message;$("jobStatus").className="job-status "+type;}
@@ -80,8 +80,8 @@ async function multipartReport(data){
  return api("/api/recap/multipart/report",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...data,online:navigator.onLine,userAgent:navigator.userAgent})}).catch(()=>{});
 }
 async function multipartUpload(file){
- const resumeKey="ahm_movies_multipart_resume_v1";
  const identity={name:file.name,size:file.size,lastModified:file.lastModified||0};
+ const resumeKey="ahm_movies_multipart_resume_v1_"+encodeURIComponent(file.name)+"_"+file.size+"_"+identity.lastModified;
  let session=state.multipartSession;
  if(!session||session.file!==file){
   let saved=null;
@@ -223,6 +223,38 @@ function startDownload(url,filename){
  const link=document.createElement("a");link.href=url;link.download=filename;link.rel="noopener";link.style.display="none";
  document.body.appendChild(link);link.click();link.remove();
 }
+$("segmentFiles").addEventListener("change",e=>{
+ const files=Array.from(e.target.files||[]).filter(f=>allowed.has(f.type)).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"}));
+ state.segments=files;
+ $("segmentTitle").textContent=files.length?files.length+" video sections selected":"Choose split movie sections";
+ $("segmentMeta").textContent=files.length?files.map(f=>f.name).join(" · ")+" | Total "+bytes(files.reduce((n,f)=>n+f.size,0)):"Select 2–24 clips; use filenames like movie_01, movie_02… to keep order";
+ $("segmentStartBtn").disabled=files.length<2||files.length>24;
+ $("segmentStatus").textContent=files.length<2?"Choose at least 2 sections.":files.length>24?"Maximum 24 sections.":"Sections sorted by filename. Upload proceeds one at a time.";
+});
+$("segmentStartBtn").addEventListener("click",async()=>{
+ if(state.uploading||state.polling||state.segments.length<2)return;
+ state.uploading=true;$("segmentStartBtn").disabled=true;state.multipartSession=null;
+ const keys=[];
+ try{
+  $("uploadProgress").hidden=false;
+  for(let i=0;i<state.segments.length;i++){
+   const file=state.segments[i];state.file=file;state.multipartSession=null;
+   $("uploadLabel").textContent="Uploading section "+(i+1)+"/"+state.segments.length+" · "+file.name;
+   $("segmentStatus").textContent="Uploading section "+(i+1)+" of "+state.segments.length+" ("+file.name+")";
+   await multipartUpload(file);keys.push(state.objectKey);state.objectKey=null;
+  }
+  const settings={targetMinutes:Number($("length").value),language:$("language").value,voice:$("voice").value,pace:Number($("pace").value)};
+  const cleanName=state.segments[0].name.replace(/[_-]?\d+\.[^.]+$/,"")||"Split movie";
+  const job=await api("/api/recap/jobs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({segmentKeys:keys,filename:cleanName,settings})});
+  state.jobId=job.id||job.job_id;state.uploading=false;state.polling=true;
+  $("segmentStatus").textContent="All sections uploaded. Worker is joining them into the full movie.";
+  status("Movie sections accepted. Full-film analysis has started.","success");await poll();
+ }catch(err){
+  state.uploading=false;$("segmentStatus").textContent="Stopped: "+err.message+" Completed uploads are retained; reselect the same sections to resume.";
+  status(err.message,"error");$("segmentStartBtn").disabled=state.segments.length<2;
+ }
+});
+
 $("startBtn").addEventListener("click",startJob);
 $("connectionTestBtn").addEventListener("click",async()=>{
  const btn=$("connectionTestBtn"),result=$("connectionTestResult");
