@@ -99,7 +99,7 @@ async function multipartUpload(file){
        const bytesDone=session.uploadedBytes+e.loaded;
        const pct=Math.round(bytesDone/file.size*100);
        $("uploadBar").style.width=pct+"%";
-       $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count · "+pct+"%";
+       $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
      },20*60*1000);
      await multipartReport({stage:"part-success",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted});
