@@ -205,6 +205,18 @@ app.post("/api/recap/multipart/complete", async (req,res) => {
     res.status(502).json({ok:false,error:"R2 could not assemble the uploaded movie parts. Retry the upload."});
   }
 });
+app.post("/api/recap/multipart/test-cleanup", async (req,res) => {
+  try {
+    const {objectKey}=req.body||{};
+    if (typeof objectKey!=="string" || !objectKey.startsWith("incoming/") || !objectKey.includes("ahm-connection-test"))
+      return res.status(400).json({ok:false,error:"Invalid multipart test cleanup request."});
+    await s3().send(new DeleteObjectCommand({Bucket:process.env.R2_BUCKET,Key:objectKey}));
+    res.json({ok:true});
+  } catch(error) {
+    console.warn("multipart test cleanup failed",error.name,error.message);
+    res.status(500).json({ok:false,error:"Could not remove multipart test object."});
+  }
+});
 app.post("/api/recap/multipart/abort", async (req,res) => {
   try {
     const {objectKey,uploadId}=req.body||{};
