@@ -17,6 +17,11 @@
     <video id="moviePreview" controls playsinline hidden></video>
   </section>
 
+  <section class="panel segment-panel">
+    <div class="section-title"><span class="step">01B</span><div><h2>Upload a movie in smaller sections</h2><p>Choose split video files in order. Uploads happen one section at a time, then the worker joins them into the full movie before analysis.</p></div></div>
+    <label class="dropzone segment-drop" for="segmentFiles"><input id="segmentFiles" type="file" multiple accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/mpeg"><span class="upload-symbol">↗</span><strong id="segmentTitle">Choose split movie sections</strong><span id="segmentMeta">Select 2–24 clips; use filenames like movie_01, movie_02… to keep order</span><span class="browse">Select sections</span></label>
+    <button type="button" id="segmentStartBtn" class="segment-start" disabled>Upload sections & create recap →</button><p id="segmentStatus" class="segment-status" role="status">Select your split sections to use this upload mode.</p>
+  </section>
   <section class="panel">
     <div class="section-title"><span class="step">02</span><div><h2>Recap production settings</h2><p>Keep the whole story intact. The third episode must include the movie's actual ending.</p></div></div>
     <div class="settings-grid">
