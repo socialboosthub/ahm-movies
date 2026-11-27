@@ -89,7 +89,7 @@ async function multipartUpload(file){
    if(parts.some(p=>p.PartNumber===partNumber))continue;
    const begin=(partNumber-1)*partSize,end=Math.min(file.size,begin+partSize),blob=file.slice(begin,end);
    let result=null,lastError=null;
-   for(let attempt=1;attempt<=10&&!result;attempt++){
+   for(let attempt=1;attempt<=6&&!result;attempt++){
     const attemptStarted=Date.now();
     try{
      await multipartReport({stage:"part-start",part:partNumber,total:count,attempt,size:blob.size});
@@ -101,19 +101,19 @@ async function multipartUpload(file){
        $("uploadBar").style.width=pct+"%";
        $("uploadLabel").textContent="Uploading movie · part "+partNumber+"/"+count+" · "+pct+"%";
       }
-     },20*60*1000);
+     },120*1000);
      await multipartReport({stage:"part-success",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted});
     }catch(error){
      lastError=error;
      await multipartReport({stage:"part-failed",part:partNumber,total:count,attempt,size:blob.size,elapsedMs:Date.now()-attemptStarted,message:error.message});
-     if(attempt<10){
-      const delay=Math.min(30000,2500*(2**Math.min(attempt-1,4)));
-      $("uploadLabel").textContent="Part "+partNumber+" interrupted · retry "+attempt+"/10 · keeping completed parts";
+     if(attempt<6){
+      const delay=Math.min(8000,1500*(attempt));
+      $("uploadLabel").textContent="Part "+partNumber+" failed · retry "+attempt+"/6 in "+Math.ceil(delay/1000)+"s · saved chunks kept";
       await new Promise(resolve=>setTimeout(resolve,delay));
      }
     }
    }
-   if(!result)throw lastError||new Error("Part "+partNumber+" failed after 10 retries. Completed parts are saved in this upload session—tap Upload & create recap to resume.");
+   if(!result)throw lastError||new Error("Part "+partNumber+" failed after 6 attempts. Completed parts are saved in this upload session—tap Upload & create recap to resume.");
    const etag=result.getResponseHeader("ETag");
    if(!etag)throw new Error("R2 did not expose the ETag for upload part "+partNumber+".");
    parts.push({PartNumber:partNumber,ETag:etag});
