@@ -207,5 +207,17 @@ function startDownload(url,filename){
  document.body.appendChild(link);link.click();link.remove();
 }
 $("startBtn").addEventListener("click",startJob);
+$("connectionTestBtn").addEventListener("click",async()=>{
+ const btn=$("connectionTestBtn"),result=$("connectionTestResult");
+ btn.disabled=true;btn.textContent="Testing connection…";result.textContent="Checking the signed R2 upload and ETag access using a tiny 32 KB test file.";
+ try{
+  await browserUploadCheck();
+  result.textContent="PASS: This browser can upload to R2 and read the ETag. The movie-upload failure is likely elsewhere in the multipart flow.";
+  result.className="connection-test-result success";
+ }catch(e){
+  result.textContent="FAIL: "+e.message+" This is a small connection test only; your movie was not uploaded.";
+  result.className="connection-test-result error";
+ }finally{btn.disabled=false;btn.textContent="Test upload connection (small test)";}
+});
 checkHealth();
 })();
