@@ -407,9 +407,29 @@ def download_url(s3,key):
 async def process(job_id,payload):
  tmp=Path(tempfile.mkdtemp(prefix="ahm-recap-"))
  try:
-  s3=store();settings=payload.get("settings",{});movie=tmp/"movie"
-  update(job_id,status="running",stage="Downloading original movie",progress=2)
-  s3.download_file(os.environ["R2_BUCKET"],payload["object_key"],str(movie))
+  s3=store();settings=payload.get("settings",{});movie=tmp/"movie.mp4"
+  segment_keys=payload.get("segment_keys") or []
+  if segment_keys:
+   if not isinstance(segment_keys,list) or not 2<=len(segment_keys)<=24 or any(not isinstance(k,str) or not k.startswith("incoming/") for k in segment_keys):
+    raise RuntimeError("Invalid segmented movie upload: expected 2–24 ordered incoming sections.")
+   update(job_id,status="running",stage=f"Downloading movie sections · 0/{len(segment_keys)}",progress=2)
+   segment_paths=[]
+   for idx,key in enumerate(segment_keys):
+    seg=tmp/f"segment_{idx:03}.mp4"
+    s3.download_file(os.environ["R2_BUCKET"],key,str(seg));segment_paths.append(seg)
+    update(job_id,stage=f"Downloading movie sections · {idx+1}/{len(segment_keys)}",progress=2+int((idx+1)/len(segment_keys)*5))
+   concat_file=tmp/"segments.txt"
+   concat_file.write_text(chr(10).join("file '"+str(p)+"'" for p in segment_paths)+chr(10),encoding="utf-8")
+   update(job_id,stage="Joining split sections into the full movie",progress=8)
+   try:
+    run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat_file),"-c","copy","-movflags","+faststart",str(movie)])
+   except Exception:
+    movie.unlink(missing_ok=True)
+    run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat_file),"-c:v","libx264","-preset","veryfast","-crf","23","-c:a","aac","-movflags","+faststart",str(movie)])
+   update(job_id,stage="Full movie reassembled · checking duration",progress=10)
+  else:
+   update(job_id,status="running",stage="Downloading original movie",progress=2)
+   s3.download_file(os.environ["R2_BUCKET"],payload["object_key"],str(movie))
   probe=json.loads(run(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type","-of","json",str(movie)]));duration=float(probe["format"]["duration"])
   has_source_audio=any(stream.get("codec_type")=="audio" for stream in probe.get("streams",[]))
   if duration<60:raise RuntimeError("The uploaded file is too short to be a full movie.")
