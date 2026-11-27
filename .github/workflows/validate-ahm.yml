@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/movie-recap-rebuild
+      - feature/modal-worker
     paths:
       - "public/**"
       - "worker/**"
