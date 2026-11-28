@@ -547,7 +547,7 @@ def health():
 @app.post("/jobs")
 async def create(payload:dict,x_ahm_worker_token:str|None=Header(default=None)):
  auth(x_ahm_worker_token)
- if not str(payload.get("object_key","")).startswith("incoming/"):raise HTTPException(400,"Invalid movie object key.")
+ segment_keys=payload.get("segment_keys") or []\n valid_segments=isinstance(segment_keys,list) and 2<=len(segment_keys)<=24 and all(isinstance(k,str) and k.startswith("incoming/") and ".." not in k for k in segment_keys)\n valid_single=isinstance(payload.get("object_key"),str) and payload["object_key"].startswith("incoming/") and ".." not in payload["object_key"]\n if not valid_segments and not valid_single:raise HTTPException(400,"Invalid movie object key or segmented upload keys.")
  jid=uuid.uuid4().hex
  job={"id":jid,"status":"queued","stage":"Waiting for worker","progress":0,"created_at":time.time()}
  with LOCK:JOBS[jid]=job
